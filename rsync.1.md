@@ -1847,12 +1847,13 @@ expand it.
 0.  `--source-backup`
 
     Makes the sender back up the source files it removes due to
-    `--remove-source-files`.  This option is independent of `--backup` but uses
-    the same `--backup-dir` and `--suffix` settings, if any.  With
-    `--backup-dir`, rsync looks for each file's backup dir relative to the
-    source argument the file came from.  Consequently, if the `--backup-dir`
-    path is relative, each source argument gets a separate backup dir at that
-    path relative to the argument.
+    [`--remove-source-files`](#opt).  This option is independent of
+    [`--backup`](#opt) but uses the same [`--backup-dir`](#opt) and
+    [`--suffix`](#opt) settings, if any.  With [`--backup-dir`](#opt), rsync
+    looks for each file's backup dir relative to the source argument the file
+    came from.  Consequently, if the [`--backup-dir`](#opt) path is relative,
+    each source argument gets a separate backup dir at that path relative to
+    the argument.
 
 0.  `--delete`
 
