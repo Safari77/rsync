@@ -42,7 +42,7 @@ extern filter_rule_list daemon_filter_list;
 int sanitize_paths = 0;
 
 char curr_dir[MAXPATHLEN];
-unsigned int curr_dir_len;
+size_t curr_dir_len;
 int curr_dir_depth; /* This is only set for a sanitizing daemon. */
 
 /* Set a fd into nonblocking mode. */
@@ -942,11 +942,12 @@ int count_dir_elements(const char *p)
  * resulting name would be empty, returns ".". */
 int clean_fname(char *name, int flags)
 {
-	char *limit = name - 1, *t = name, *f = name;
+	char *limit, *t = name, *f = name;
 	int anchored;
 
 	if (!name)
 		return 0;
+	limit = name - 1;
 
 #define DOT_IS_DOT_DOT_DIR(bp) (bp[1] == '.' && (bp[2] == '/' || !bp[2]))
 
@@ -1362,15 +1363,15 @@ int unsafe_symlink(const char *dest, const char *src)
 /* Return the date and time as a string.  Some callers tweak returned buf. */
 char *timestring(time_t t)
 {
+	struct tm tmbuf;
 	static int ndx = 0;
 	static char buffers[4][20]; /* We support 4 simultaneous timestring results. */
 	char *TimeBuf = buffers[ndx = (ndx + 1) % 4];
-	struct tm *tm = localtime(&t);
-	int len = snprintf(TimeBuf, sizeof buffers[0], "%4d/%02d/%02d %02d:%02d:%02d",
-		 (int)tm->tm_year + 1900, (int)tm->tm_mon + 1, (int)tm->tm_mday,
-		 (int)tm->tm_hour, (int)tm->tm_min, (int)tm->tm_sec);
-	assert(len > 0); /* Silence gcc warning */
+	localtime_r(&t, &tmbuf);
 
+	snprintf(TimeBuf, sizeof buffers[0], "%4d/%02d/%02d %02d:%02d:%02d",
+		 (int)tmbuf.tm_year + 1900, (int)tmbuf.tm_mon + 1, (int)tmbuf.tm_mday,
+		 (int)tmbuf.tm_hour, (int)tmbuf.tm_min, (int)tmbuf.tm_sec);
 	return TimeBuf;
 }
 
@@ -1687,12 +1688,4 @@ void *expand_item_list(item_list *lp, size_t item_size, const char *desc, int in
 		lp->malloced = expand_size;
 	}
 	return (char*)lp->items + (lp->count++ * item_size);
-}
-
-/* This zeroing of memory won't be optimized away by the compiler. */
-void force_memzero(void *buf, size_t len)
-{
-	volatile uchar *z = buf;
-	while (len-- > 0)
-		*z++ = '\0';
 }

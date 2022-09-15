@@ -124,8 +124,13 @@ static void logit(int priority, const char *buf)
 	if (logfile_was_closed)
 		logfile_reopen();
 	if (logfile_fp) {
-		fprintf(logfile_fp, "%s [%d] %s", timestring(time(NULL)), (int)getpid(), buf);
-		fflush(logfile_fp);
+		if (logfile_fp != stderr) {
+			fprintf(logfile_fp, "%s [%d] %s",
+				timestring(time(NULL)), (int)getpid(), buf);
+			fflush(logfile_fp);
+		} else {
+			fprintf(logfile_fp, "[%d] %s", (int)getpid(), buf);
+		}
 	} else {
 		syslog(priority, "%s", buf);
 	}
@@ -153,6 +158,11 @@ static void syslog_init()
 static void logfile_open(void)
 {
 	mode_t old_umask = umask(022 | orig_umask);
+
+	if (!strcmp(logfile_name, "-")) {
+		logfile_fp = stderr;
+		return;
+	}
 	logfile_fp = fopen(logfile_name, "a");
 	umask(old_umask);
 	if (!logfile_fp) {
@@ -174,8 +184,10 @@ void log_init(int restart)
 		assert(logfile_name); /* all am_daemon procs got at least an empty string */
 		if (strcmp(logfile_name, lp_log_file(module_id)) != 0) {
 			if (logfile_fp) {
-				fclose(logfile_fp);
-				logfile_fp = NULL;
+				if (logfile_fp != stderr) {
+					fclose(logfile_fp);
+					logfile_fp = NULL;
+				}
 			} else
 				closelog();
 			logfile_name = NULL;
@@ -207,7 +219,7 @@ void log_init(int restart)
 /* Note that this close & reopen idiom intentionally ignores syslog logging. */
 void logfile_close(void)
 {
-	if (logfile_fp) {
+	if (logfile_fp && (logfile_fp != stderr)) {
 		logfile_was_closed = 1;
 		fclose(logfile_fp);
 		logfile_fp = NULL;

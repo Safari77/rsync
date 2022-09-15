@@ -99,7 +99,7 @@ char *client_addr(int fd)
  **/
 char *client_name(const char *ipaddr)
 {
-	static char name_buf[100];
+	static char name_buf[256];
 	char port_buf[100];
 	struct sockaddr_storage ss;
 	socklen_t ss_len;
@@ -434,8 +434,10 @@ static int check_name(const char *ipaddr, const struct sockaddr_storage *ss, cha
 	hints.ai_socktype = SOCK_STREAM;
 	error = getaddrinfo(name_buf, NULL, &hints, &res0);
 	if (error) {
+#if RSYNC_DNS_DEBUG
 		rprintf(FLOG, "forward name lookup for %s failed: %s\n",
 			name_buf, gai_strerror(error));
+#endif
 		strlcpy(name_buf, default_name, name_buf_size);
 		return error;
 	}
@@ -450,14 +452,18 @@ static int check_name(const char *ipaddr, const struct sockaddr_storage *ss, cha
 	if (!res0) {
 		/* We hit the end of the list without finding an
 		 * address that was the same as ss. */
+#if RSYNC_DNS_DEBUG
 		rprintf(FLOG, "no known address for \"%s\": "
 			"spoofed address?\n", name_buf);
+#endif
 		strlcpy(name_buf, default_name, name_buf_size);
 	} else if (res == NULL) {
 		/* We hit the end of the list without finding an
 		 * address that was the same as ss. */
+#if RSYNC_DNS_DEBUG
 		rprintf(FLOG, "%s is not a known address for \"%s\": "
 			"spoofed address?\n", ipaddr, name_buf);
+#endif
 		strlcpy(name_buf, default_name, name_buf_size);
 	}
 

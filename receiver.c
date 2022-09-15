@@ -246,7 +246,7 @@ static int receive_data(int f_in, char *fname_r, int fd_r, OFF_T size_r,
 	OFF_T total_size = F_LENGTH(file);
 	OFF_T offset = 0;
 	OFF_T offset2;
-	char *data;
+	char *data = NULL;
 	int32 i;
 	char *map = NULL;
 
@@ -397,7 +397,8 @@ static int receive_data(int f_in, char *fname_r, int fd_r, OFF_T size_r,
 	sum_end(file_sum1);
 
 	if (do_fsync && fd != -1 && fsync(fd) != 0) {
-		rsyserr(FERROR, errno, "fsync failed on %s", full_fname(fname));
+		rsyserr(FERROR, errno, "fsync failed on %s",
+			full_fname(fname));
 		exit_cleanup(RERR_FILEIO);
 	}
 

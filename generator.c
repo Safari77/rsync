@@ -40,6 +40,7 @@ extern int preserve_acls;
 extern int preserve_xattrs;
 extern int preserve_links;
 extern int preserve_devices;
+extern int copy_devices;
 extern int preserve_specials;
 extern int preserve_hard_links;
 extern int preserve_executability;
@@ -1677,7 +1678,7 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
 		goto cleanup;
 	}
 
-	if (ftype != FT_REG) {
+	if (ftype != FT_REG && (!copy_devices || ftype != FT_DEVICE)) {
 		if (INFO_GTE(NONREG, 1)) {
 			if (solo_file)
 				fname = f_name(file, NULL);
@@ -1901,6 +1902,9 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
 		}
 		fnamecmp_type = FNAMECMP_BACKUP;
 	}
+
+	if (IS_DEVICE(sx.st.st_mode) && sx.st.st_size == 0)
+		sx.st.st_size = get_device_size(fd, fnamecmp);
 
 	if (DEBUG_GTE(DELTASUM, 3)) {
 		rprintf(FINFO, "gen mapped %s of size %s\n",

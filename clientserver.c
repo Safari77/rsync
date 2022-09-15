@@ -741,20 +741,6 @@ static int rsync_module(int f_in, int f_out, int i, const char *addr, const char
 			name, host, addr);
 	}
 
-	if (!claim_connection(lp_lock_file(i), lp_max_connections(i))) {
-		if (errno) {
-			rsyserr(FLOG, errno, "failed to open lock file %s",
-				lp_lock_file(i));
-			io_printf(f_out, "@ERROR: failed to open lock file\n");
-		} else {
-			rprintf(FLOG, "max connections (%d) reached\n",
-				lp_max_connections(i));
-			io_printf(f_out, "@ERROR: max connections (%d) reached -- try again later\n",
-				lp_max_connections(i));
-		}
-		return -1;
-	}
-
 	read_only = lp_read_only(i); /* may also be overridden by auth_server() */
 	auth_user = auth_server(f_in, f_out, i, host, addr, "@RSYNCD: AUTHREQD ");
 
@@ -1380,11 +1366,6 @@ int start_daemon(int f_in, int f_out)
 		io_printf(f_out, "@ERROR: Unknown module '%s'\n", line);
 		return -1;
 	}
-
-#ifdef HAVE_SIGACTION
-	sigact.sa_flags = SA_NOCLDSTOP;
-#endif
-	SIGACTION(SIGCHLD, remember_children);
 
 	return rsync_module(f_in, f_out, i, addr, host);
 }

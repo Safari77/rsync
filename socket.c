@@ -41,9 +41,45 @@ extern int default_af_hint;
 extern int connect_timeout;
 extern int pid_file_fd;
 
-#ifdef HAVE_SIGACTION
-static struct sigaction sigact;
-#endif
+extern int module_id;
+
+static void sig_pause(void)
+{
+	sigset_t ss;
+
+	sigemptyset(&ss);
+	sigsuspend(&ss);
+}
+
+static void sig_block(int sig)
+{
+	sigset_t ss;
+
+	sigemptyset(&ss);
+	sigaddset(&ss,sig);
+	sigprocmask(SIG_BLOCK,&ss,(sigset_t *) 0);
+}
+
+static void sig_unblock(int sig)
+{
+	sigset_t ss;
+
+	sigemptyset(&ss);
+	sigaddset(&ss,sig);
+	sigprocmask(SIG_UNBLOCK,&ss,(sigset_t *) 0);
+}
+
+static void sig_catch(int sig, void (*f)(int))
+{
+	struct sigaction sa;
+
+	sa.sa_handler = f;
+	sa.sa_flags = (sig == SIGCHLD) ? SA_NOCLDSTOP : 0;
+	sigemptyset(&sa.sa_mask);
+	sigaction(sig,&sa,(struct sigaction *) 0);
+}
+
+#define sig_uncatch(s) (sig_catch(s, SIG_DFL))
 
 static int sock_exec(const char *prog);
 
@@ -268,7 +304,7 @@ int open_socket_out(char *host, int port, const char *bind_addr, int af_hint)
 			continue;
 		}
 		if (connect_timeout > 0) {
-			SIGACTION(SIGALRM, contimeout_handler);
+			sig_catch(SIGALRM, contimeout_handler);
 			alarm(connect_timeout);
 		}
 
@@ -518,26 +554,36 @@ int is_a_socket(int fd)
 	return getsockopt(fd, SOL_SOCKET, SO_TYPE, (char *)&v, &l) == 0;
 }
 
+static int volatile numchildren;
+
+static void printstatus(void)
+{
+	rprintf(FINFO, "%d/%d childs\n", numchildren, lp_max_connections(module_id));
+}
 
 static void sigchld_handler(UNUSED(int val))
 {
-#ifdef WNOHANG
-	while (waitpid(-1, NULL, WNOHANG) > 0) {}
-#endif
+	int wstat;
+	int pid;
+	int crashed;
+
+	while ((pid = waitpid(-1, &wstat, WNOHANG)) > 0) {
+		crashed = WIFSIGNALED(wstat);
+		rprintf(FINFO, "children %d status %s %d\n", pid, crashed ? "signal" : "exit",
+			crashed ? WTERMSIG(wstat) : WEXITSTATUS(wstat));
+		if (numchildren) --numchildren;
+		printstatus();
+	}
+
 #ifndef HAVE_SIGACTION
 	signal(SIGCHLD, sigchld_handler);
 #endif
 }
 
-
 void start_accept_loop(int port, int (*fn)(int, int))
 {
 	fd_set deffds;
 	int *sp, maxfd, i;
-
-#ifdef HAVE_SIGACTION
-	sigact.sa_flags = SA_NOCLDSTOP;
-#endif
 
 	/* open an incoming socket */
 	sp = open_socket_in(SOCK_STREAM, port, bind_address, default_af_hint);
@@ -561,6 +607,13 @@ void start_accept_loop(int port, int (*fn)(int, int))
 			maxfd = sp[i];
 	}
 
+	sig_block(SIGCHLD);
+#ifndef HAVE_SIGACTION
+	signal(SIGCHLD, sigchld_handler);
+#else
+	sig_catch(SIGCHLD, sigchld_handler);
+#endif
+
 	/* now accept incoming connections - forking a new process
 	 * for each incoming connection */
 	while (1) {
@@ -575,14 +628,20 @@ void start_accept_loop(int port, int (*fn)(int, int))
 		 * forever */
 		logfile_close();
 
+		while (numchildren >= lp_max_connections(module_id)) sig_pause();
+
 #ifdef FD_COPY
 		FD_COPY(&deffds, &fds);
 #else
 		fds = deffds;
 #endif
 
-		if (select(maxfd + 1, &fds, NULL, NULL, NULL) < 1)
+		sig_unblock(SIGCHLD);
+		if (select(maxfd + 1, &fds, NULL, NULL, NULL) < 1) {
+			sig_block(SIGCHLD);
 			continue;
+		}
+		sig_unblock(SIGCHLD);
 
 		for (i = 0, fd = -1; sp[i] >= 0; i++) {
 			if (FD_ISSET(sp[i], &fds)) {
@@ -590,11 +649,13 @@ void start_accept_loop(int port, int (*fn)(int, int))
 				break;
 			}
 		}
+		sig_block(SIGCHLD);
 
 		if (fd < 0)
 			continue;
 
-		SIGACTION(SIGCHLD, sigchld_handler);
+		++numchildren;
+		printstatus();
 
 		if ((pid = fork()) == 0) {
 			int ret;
@@ -602,6 +663,8 @@ void start_accept_loop(int port, int (*fn)(int, int))
 				close(pid_file_fd);
 			for (i = 0; sp[i] >= 0; i++)
 				close(sp[i]);
+			sig_uncatch(SIGCHLD);
+			sig_unblock(SIGCHLD);
 			/* Re-open log file in child before possibly giving
 			 * up privileges (see logfile_close() above). */
 			logfile_reopen();
@@ -611,20 +674,16 @@ void start_accept_loop(int port, int (*fn)(int, int))
 		} else if (pid < 0) {
 			rsyserr(FERROR, errno,
 				"could not create child server process");
-			close(fd);
-			/* This might have happened because we're
-			 * overloaded.  Sleep briefly before trying to
-			 * accept again. */
-			sleep(2);
-		} else {
-			/* Parent doesn't need this fd anymore. */
-			close(fd);
+			--numchildren;
+			printstatus();
 		}
+		/* Parent doesn't need this fd anymore. */
+		close(fd);
 	}
 }
 
 
-enum SOCK_OPT_TYPES {OPT_BOOL,OPT_INT,OPT_ON};
+enum SOCK_OPT_TYPES {OPT_BOOL, OPT_INT, OPT_ON, OPT_TIMEVAL};
 
 struct
 {
@@ -661,10 +720,10 @@ struct
   {"SO_RCVLOWAT",       SOL_SOCKET,    SO_RCVLOWAT,     0,                 OPT_INT},
 #endif
 #ifdef SO_SNDTIMEO
-  {"SO_SNDTIMEO",       SOL_SOCKET,    SO_SNDTIMEO,     0,                 OPT_INT},
+  {"SO_SNDTIMEO",       SOL_SOCKET,    SO_SNDTIMEO,     0,                 OPT_TIMEVAL},
 #endif
 #ifdef SO_RCVTIMEO
-  {"SO_RCVTIMEO",       SOL_SOCKET,    SO_RCVTIMEO,     0,                 OPT_INT},
+  {"SO_RCVTIMEO",       SOL_SOCKET,    SO_RCVTIMEO,     0,                 OPT_TIMEVAL},
 #endif
   {NULL,0,0,0,0}
 };
@@ -685,6 +744,7 @@ void set_socket_options(int fd, char *options)
 		int value = 1;
 		char *p;
 		int got_value = 0;
+		struct timeval tv;
 
 		if ((p = strchr(tok,'='))) {
 			*p = 0;
@@ -708,6 +768,14 @@ void set_socket_options(int fd, char *options)
 			ret = setsockopt(fd,socket_options[i].level,
 					 socket_options[i].option,
 					 (char *)&value, sizeof (int));
+			break;
+
+		case OPT_TIMEVAL:
+			tv.tv_sec = value;
+			tv.tv_usec = 0;
+			ret = setsockopt(fd,socket_options[i].level,
+					 socket_options[i].option,
+					 &tv, sizeof (tv));
 			break;
 
 		case OPT_ON:

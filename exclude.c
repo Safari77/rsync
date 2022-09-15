@@ -43,7 +43,7 @@ extern int trust_sender_args;
 extern int module_id;
 
 extern char curr_dir[MAXPATHLEN];
-extern unsigned int curr_dir_len;
+extern size_t curr_dir_len;
 extern unsigned int module_dirlen;
 
 filter_rule_list filter_list = { .debug_type = "" };
@@ -659,7 +659,7 @@ static char *parse_merge_name(const char *merge_file, unsigned int *len_ptr,
 /* Sets the dirbuf and dirbuf_len values. */
 void set_filter_dir(const char *dir, unsigned int dirlen)
 {
-	unsigned int len;
+	size_t len;
 	if (*dir != '/') {
 		memcpy(dirbuf, curr_dir, curr_dir_len);
 		dirbuf[curr_dir_len] = '/';
@@ -1223,8 +1223,8 @@ static filter_rule *parse_rule_tok(const char **rulestr_ptr,
 			default:
 			    invalid:
 				rprintf(FERROR,
-					"invalid modifier '%c' at position %d in filter rule: %s\n",
-					*s, (int)(s - (const uchar *)*rulestr_ptr), *rulestr_ptr);
+					"invalid modifier '%c' at position %zd in filter rule: %s\n",
+					*s, (s - (const uchar *)*rulestr_ptr), *rulestr_ptr);
 				exit_cleanup(RERR_SYNTAX);
 			case '-':
 				if (!BITS_SETnUNSET(rule->rflags, FILTRULE_MERGE_FILE, FILTRULE_NO_PREFIXES))

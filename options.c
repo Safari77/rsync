@@ -34,6 +34,7 @@ extern filter_rule_list filter_list;
 extern filter_rule_list daemon_filter_list;
 
 int make_backups = 0;
+int make_source_backups = 0;
 
 /**
  * If 1, send the whole file as literal data rather than trying to
@@ -776,6 +777,7 @@ static struct poptOption long_options[] = {
   {"bwlimit",          0,  POPT_ARG_STRING, &bwlimit_arg, OPT_BWLIMIT, 0, 0 },
   {"no-bwlimit",       0,  POPT_ARG_VAL,    &bwlimit, 0, 0, 0 },
   {"backup",          'b', POPT_ARG_VAL,    &make_backups, 1, 0, 0 },
+  {"source-backup",    0,  POPT_ARG_NONE,   &make_source_backups, 0, 0, 0},
   {"no-backup",        0,  POPT_ARG_VAL,    &make_backups, 0, 0, 0 },
   {"backup-dir",       0,  POPT_ARG_STRING, &backup_dir, 0, 0, 0 },
   {"suffix",           0,  POPT_ARG_STRING, &backup_suffix, 0, 0, 0 },
@@ -2816,8 +2818,11 @@ void server_options(char **args, int *argc_p)
 		if (do_stats)
 			args[ac++] = "--stats";
 	} else {
-		if (skip_compress)
+		if (skip_compress) {
 			args[ac++] = safe_arg("--skip-compress", skip_compress);
+		}
+		if (make_source_backups)
+			args[ac++] = "--source-backup";
 	}
 
 	if (max_alloc_arg && max_alloc != DEFAULT_MAX_ALLOC)

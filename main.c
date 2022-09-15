@@ -66,7 +66,7 @@ extern int protect_args;
 extern int relative_paths;
 extern int sanitize_paths;
 extern int curr_dir_depth;
-extern int curr_dir_len;
+extern size_t curr_dir_len;
 extern int module_id;
 extern int rsync_port;
 extern int whole_file;
@@ -138,8 +138,6 @@ struct pid_status {
 
 static time_t starttime, endtime;
 static int64 total_read, total_written;
-
-static void show_malloc_stats(void);
 
 /* Works like waitpid(), but if we already harvested the child pid in our
  * remember_children(), we succeed instead of returning an error. */
@@ -330,7 +328,6 @@ static void handle_stats(int f)
 
 	if (INFO_GTE(STATS, 3)) {
 		/* These come out from every process */
-		show_malloc_stats();
 		show_flist_stats();
 	}
 
@@ -461,42 +458,6 @@ static void output_summary(void)
 	fflush(stdout);
 	fflush(stderr);
 }
-
-
-/**
- * If our C library can get malloc statistics, then show them to FINFO
- **/
-static void show_malloc_stats(void)
-{
-#ifdef MEM_ALLOC_INFO
-	struct MEM_ALLOC_INFO mi = MEM_ALLOC_INFO(); /* mallinfo or mallinfo2 */
-
-	rprintf(FCLIENT, "\n");
-	rprintf(FINFO, RSYNC_NAME "[%d] (%s%s%s) heap statistics:\n",
-		(int)getpid(), am_server ? "server " : "",
-		am_daemon ? "daemon " : "", who_am_i());
-
-#define PRINT_ALLOC_NUM(title, descr, num) \
-	rprintf(FINFO, "  %-11s%10" SIZE_T_FMT_MOD "d   (" descr ")\n", \
-		title ":", (SIZE_T_FMT_CAST)(num));
-
-	PRINT_ALLOC_NUM("arena", "bytes from sbrk", mi.arena);
-	PRINT_ALLOC_NUM("ordblks", "chunks not in use", mi.ordblks);
-	PRINT_ALLOC_NUM("smblks", "free fastbin blocks", mi.smblks);
-	PRINT_ALLOC_NUM("hblks", "chunks from mmap", mi.hblks);
-	PRINT_ALLOC_NUM("hblkhd", "bytes from mmap", mi.hblkhd);
-	PRINT_ALLOC_NUM("allmem", "bytes from sbrk + mmap", mi.arena + mi.hblkhd);
-	PRINT_ALLOC_NUM("usmblks", "always 0", mi.usmblks);
-	PRINT_ALLOC_NUM("fsmblks", "bytes in freed fastbin blocks", mi.fsmblks);
-	PRINT_ALLOC_NUM("uordblks", "bytes used", mi.uordblks);
-	PRINT_ALLOC_NUM("fordblks", "bytes free", mi.fordblks);
-	PRINT_ALLOC_NUM("keepcost", "bytes in releasable chunk", mi.keepcost);
-
-#undef PRINT_ALLOC_NUM
-
-#endif /* MEM_ALLOC_INFO */
-}
-
 
 /* Start the remote shell.   cmd may be NULL to use the default. */
 static pid_t do_cmd(char *cmd, char *machine, char *user, char **remote_argv, int remote_argc,
@@ -835,11 +796,14 @@ static void check_alt_basis_dirs(void)
 
 	for (j = 0; j < basis_dir_cnt; j++) {
 		char *bdir = basis_dir[j];
-		int bd_len = strlen(bdir);
+		size_t  bd_len = strlen(bdir);
 		if (bd_len > 1 && bdir[bd_len-1] == '/')
 			bdir[--bd_len] = '\0';
 		if (dry_run > 1 && *bdir != '/') {
-			int len = curr_dir_len + 1 + bd_len + 1;
+			size_t len = curr_dir_len;
+			if (len > SIZE_MAX - 1 - bd_len - 1)
+				out_of_memory("check_alt_basis_dirs");
+			len += 1 + bd_len + 1;
 			char *new = new_array(char, len);
 			if (slash && strncmp(bdir, "../", 3) == 0) {
 				/* We want to remove only one leading "../" prefix for
@@ -1755,6 +1719,7 @@ int main(int argc,char *argv[])
 #endif
 
 	memset(&stats, 0, sizeof(stats));
+	tzset();
 
 	/* Even a non-daemon runs needs the default config values to be set, e.g.
 	 * lp_dont_compress() is queried when no --skip-compress option is set. */

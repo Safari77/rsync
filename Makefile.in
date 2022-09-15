@@ -48,7 +48,7 @@ OBJS1=flist.o rsync.o generator.o receiver.o cleanup.o sender.o exclude.o \
 OBJS2=options.o io.o compat.o hlink.o token.o uidlist.o socket.o hashtable.o \
 	usage.o fileio.o batch.o clientname.o chmod.o acls.o xattrs.o
 OBJS3=progress.o pipe.o @MD5_ASM@ @ROLL_SIMD@ @ROLL_ASM@
-DAEMON_OBJ = params.o loadparm.o clientserver.o access.o connection.o authenticate.o
+DAEMON_OBJ = params.o loadparm.o clientserver.o access.o authenticate.o
 popt_OBJS=popt/findme.o  popt/popt.o  popt/poptconfig.o \
 	popt/popthelp.o popt/poptparse.o
 OBJS=$(OBJS1) $(OBJS2) $(OBJS3) $(DAEMON_OBJ) $(LIBOBJ) @BUILD_ZLIB@ @BUILD_POPT@
@@ -67,7 +67,7 @@ CHECK_OBJS=tls.o testrun.o getgroups.o getfsdev.o t_stub.o t_unsafe.o trimslash.
 # note that the -I. is needed to handle config.h when using VPATH
 .c.o:
 @OBJ_SAVE@
-	$(CC) -I. -I$(srcdir) $(CFLAGS) $(CPPFLAGS) -c $< @CC_SHOBJ_FLAG@
+	$(CC) -I. -I$(srcdir) $(CFLAGS) $(CPPFLAGS) -flto -c $< @CC_SHOBJ_FLAG@
 @OBJ_RESTORE@
 
 all: Makefile rsync$(EXEEXT) stunnel-rsyncd.conf @MAKE_RRSYNC@ @MAKE_MAN@
@@ -101,7 +101,7 @@ install-strip:
 	$(MAKE) INSTALL_STRIP='-s' install
 
 rsync$(EXEEXT): $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -lrt -flto -ljemalloc -o $@ $(OBJS) $(LIBS)
 
 rrsync: support/rrsync
 	cp -p $(srcdir)/support/rrsync rrsync

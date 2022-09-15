@@ -20,6 +20,8 @@
  * with this program; if not, visit the http://fsf.org website.
  */
 
+#include <sys/sysmacros.h>
+
 #include "rsync.h"
 #include "ifuncs.h"
 #include "rounding.h"

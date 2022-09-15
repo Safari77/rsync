@@ -29,7 +29,6 @@ STRING	hosts_deny		NULL
 STRING	include			NULL
 STRING	include_from		NULL
 STRING	incoming_chmod		NULL
-STRING	lock_file		DEFAULT_LOCK_FILE
 STRING	log_file		NULL
 STRING	log_format		"%o %h [%a] %m (%u) %f %l"
 STRING	name			NULL

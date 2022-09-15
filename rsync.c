@@ -33,6 +33,7 @@ extern int preserve_xattrs;
 extern int preserve_perms;
 extern int preserve_executability;
 extern int preserve_mtimes;
+extern int copy_devices;
 extern int omit_dir_times;
 extern int omit_link_times;
 extern int am_root;
@@ -285,7 +286,7 @@ void send_protected_args(int fd, char *args[])
 	int i;
 #ifdef ICONV_OPTION
 	int convert = ic_send != (iconv_t)-1;
-	xbuf outbuf, inbuf;
+	xbuf outbuf = {0}, inbuf;
 
 	if (convert)
 		alloc_xbuf(&outbuf, 1024);
@@ -420,7 +421,8 @@ int read_ndx_and_attrs(int f_in, int f_out, int *iflag_ptr, uchar *type_ptr, cha
 
 	if (iflags & ITEM_TRANSFER) {
 		int i = ndx - cur_flist->ndx_start;
-		if (i < 0 || !S_ISREG(cur_flist->files[i]->mode)) {
+		struct file_struct *file = cur_flist->files[i];
+		if (i < 0 || !(S_ISREG(file->mode) || (copy_devices && IS_DEVICE(file->mode)))) {
 			rprintf(FERROR,
 				"received request to transfer non-regular file: %d [%s]\n",
 				ndx, who_am_i());

@@ -28,7 +28,7 @@ extern int dry_run;
 extern int am_root;
 extern int read_only;
 extern int list_only;
-extern int orig_umask;
+extern mode_t orig_umask;
 extern int numeric_ids;
 extern int inc_recurse;
 extern int preserve_devices;
@@ -272,7 +272,7 @@ static BOOL unpack_smb_acl(SMB_ACL_T sacl, rsync_acl *racl)
 	     rc = sys_acl_get_entry(sacl, SMB_ACL_NEXT_ENTRY, &entry)) {
 		SMB_ACL_TAG_T tag_type;
 		uint32 access;
-		id_t g_u_id;
+		id_t g_u_id = 0;
 		id_access *ida;
 		if ((rc = sys_acl_get_info(entry, &tag_type, &access, &g_u_id)) != 0) {
 			errfun = "sys_acl_get_info";

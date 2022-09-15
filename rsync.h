@@ -30,7 +30,6 @@
 /* RSYNCD_SYSCONF is now set in config.h */
 #define RSYNCD_USERCONF "rsyncd.conf"
 
-#define DEFAULT_LOCK_FILE "/var/run/rsyncd.lock"
 #define URL_PREFIX "rsync://"
 
 #define SYMLINK_PREFIX "/rsyncd-munged/"  /* This MUST have a trailing slash! */
@@ -152,7 +151,7 @@
 
 #define RSYNC_PORT 873
 
-#define SPARSE_WRITE_SIZE (1024)
+#define SPARSE_WRITE_SIZE (32768)
 #define WRITE_SIZE (32*1024)
 #define CHUNK_SIZE (32*1024)
 #define MAX_MAP_SIZE (256*1024)
@@ -715,6 +714,9 @@ struct ht_int64_node {
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 256
 #endif
+
+/* Change to 1 if you want to log if there is PTR/A record mismatch */
+#define RSYNC_DNS_DEBUG 0
 
 #define SUM_LENGTH 16
 #define SHORT_SUM_LENGTH 2
@@ -1485,8 +1487,3 @@ const char *get_panic_action(void);
     exit_cleanup(RERR_UNSUPPORTED); \
 } while (0)
 
-#ifdef HAVE_MALLINFO2
-#define MEM_ALLOC_INFO mallinfo2
-#elif defined HAVE_MALLINFO
-#define MEM_ALLOC_INFO mallinfo
-#endif

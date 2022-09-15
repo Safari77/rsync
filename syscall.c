@@ -232,7 +232,7 @@ int do_open(const char *pathname, int flags, mode_t mode)
 int do_chmod(const char *path, mode_t mode)
 {
 	static int switch_step = 0;
-	int code;
+	int code = 0;
 
 	if (dry_run) return 0;
 	RETURN_ERROR_IF_RO_OR_LO;

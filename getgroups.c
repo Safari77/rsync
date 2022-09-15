@@ -36,6 +36,10 @@
 	n = 0;
 #endif
 
+	if ((n == INT_MAX) || ((size_t)n + 1 > (SIZE_MAX / sizeof(gid_t)))) {
+		fprintf(stderr, "not enough memory, getgroups returned %d\n", n);
+		exit(1);
+	}
 	list = (gid_t*)malloc(sizeof (gid_t) * (n + 1));
 	if (!list) {
 		fprintf(stderr, "out of memory!\n");

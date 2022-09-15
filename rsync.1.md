@@ -441,6 +441,7 @@ has its own detailed description later in this manpage.
 --existing               skip creating new files on receiver
 --ignore-existing        skip updating files that exist on receiver
 --remove-source-files    sender removes synchronized files (non-dir)
+--source-backup          ... and backs up those files
 --del                    an alias for --delete-during
 --delete                 delete extraneous files from dest dirs
 --delete-before          receiver deletes before xfer, not during
@@ -1842,6 +1843,16 @@ expand it.
     Starting with 3.2.6, a local rsync copy will ensure that the sender does
     not remove a file the receiver just verified, such as when the user
     accidentally makes the source and destination directory the same path.
+
+0.  `--source-backup`
+
+    Makes the sender back up the source files it removes due to
+    `--remove-source-files`.  This option is independent of `--backup` but uses
+    the same `--backup-dir` and `--suffix` settings, if any.  With
+    `--backup-dir`, rsync looks for each file's backup dir relative to the
+    source argument the file came from.  Consequently, if the `--backup-dir`
+    path is relative, each source argument gets a separate backup dir at that
+    path relative to the argument.
 
 0.  `--delete`
 

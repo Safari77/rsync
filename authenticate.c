@@ -62,15 +62,15 @@ static void gen_challenge(const char *addr, char *challenge)
 {
 	char input[32];
 	char digest[MAX_DIGEST_LEN];
-	struct timeval tv;
+	struct timespec tsp;
 	int len;
 
 	memset(input, 0, sizeof input);
 
 	strlcpy(input, addr, 17);
-	sys_gettimeofday(&tv);
-	SIVAL(input, 16, tv.tv_sec);
-	SIVAL(input, 20, tv.tv_usec);
+	clock_gettime(CLOCK_REALTIME, &tsp);
+	SIVAL(input, 16, tsp.tv_sec);
+	SIVAL(input, 20, tsp.tv_nsec);
 	SIVAL(input, 24, getpid());
 
 	len = sum_init(valid_auth_checksums.negotiated_nni, 0);
@@ -164,8 +164,8 @@ static const char *check_secret(int module, const char *user, const char *group,
 
 	fclose(fh);
 
-	force_memzero(line, sizeof line);
-	force_memzero(pass2, sizeof pass2);
+	explicit_bzero(line, sizeof line);
+	explicit_bzero(pass2, sizeof pass2);
 
 	return err;
 }
@@ -319,8 +319,8 @@ char *auth_server(int f_in, int f_out, int module, const char *host,
 		err = check_secret(module, line, group, challenge, pass);
 	}
 
-	force_memzero(challenge, sizeof challenge);
-	force_memzero(pass, strlen(pass));
+	explicit_bzero(challenge, sizeof challenge);
+	explicit_bzero(pass, strlen(pass));
 
 	if (auth_uid_groups) {
 		int j;

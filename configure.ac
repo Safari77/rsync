@@ -4,7 +4,20 @@ AC_INIT([rsync],[ ],[https://rsync.samba.org/bug-tracking.html])
 
 AC_C_BIGENDIAN
 AC_HEADER_DIRENT
-AC_HEADER_TIME
+m4_warn([obsolete],
+[Update your code to rely only on HAVE_SYS_TIME_H,
+then remove this warning and the obsolete code below it.
+All current systems provide time.h; it need not be checked for.
+Not all systems provide sys/time.h, but those that do, all allow
+you to include it and time.h simultaneously.])dnl
+AC_CHECK_HEADERS_ONCE([sys/time.h])
+# Obsolete code to be removed.
+if test $ac_cv_header_sys_time_h = yes; then
+  AC_DEFINE([TIME_WITH_SYS_TIME],[1],[Define to 1 if you can safely include both <sys/time.h>
+	     and <time.h>.  This macro is obsolete.])
+fi
+# End of obsolete code.
+
 AC_HEADER_SYS_WAIT
 AC_CHECK_HEADERS(sys/fcntl.h sys/select.h fcntl.h sys/time.h sys/unistd.h \
     unistd.h utime.h compat.h sys/param.h ctype.h sys/wait.h sys/stat.h \
@@ -20,8 +33,8 @@ AC_HEADER_MAJOR_FIXED
 
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([byteorder.h])
-AC_CONFIG_HEADER(config.h)
-AC_PREREQ([2.69])
+AC_CONFIG_HEADERS([config.h])
+AC_PREREQ([2.71])
 
 PACKAGE_VERSION=`sed -n 's/.*RSYNC_VERSION.*"\(.*\)".*/\1/p' <$srcdir/version.h`
 
@@ -61,7 +74,6 @@ AC_PROG_AWK
 AC_PROG_EGREP
 AC_PROG_INSTALL
 AC_PROG_MKDIR_P
-AC_PROG_CC_STDC
 AC_SUBST(SHELL)
 AC_PATH_PROG([PERL], [perl])
 AC_PATH_PROG([PYTHON3], [python3])
@@ -378,35 +390,7 @@ if test x"$rsync_cv_HAVE_BROKEN_LARGEFILE" != x"yes"; then
    AC_SYS_LARGEFILE
 fi
 
-AC_MSG_CHECKING([whether to enable ipv6])
-AC_ARG_ENABLE(ipv6,
-AS_HELP_STRING([--disable-ipv6],[disable to omit ipv6 support]),
-[ case "$enableval" in
-  no)
-	AC_MSG_RESULT(no)
-	;;
-  *)	AC_MSG_RESULT(yes)
-	AC_DEFINE(INET6, 1, [true if you have IPv6])
-	;;
-  esac ],
-
-  AC_TRY_RUN([ /* AF_INET6 availability check */
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-main()
-{
-   if (socket(AF_INET6, SOCK_STREAM, 0) < 0)
-     exit(1);
-   else
-     exit(0);
-}
-],
-  AC_MSG_RESULT(yes)
-  AC_DEFINE(INET6, 1, [true if you have IPv6]),
-  AC_MSG_RESULT(no),
-  AC_MSG_RESULT(no)
-))
+AC_DEFINE(INET6, 1, [true if you have IPv6])
 
 dnl Do you want to disable use of locale functions
 AC_ARG_ENABLE([locale],
@@ -528,7 +512,7 @@ fi
 
 AC_MSG_CHECKING([whether to enable zstd compression])
 AC_ARG_ENABLE([zstd],
-        AC_HELP_STRING([--disable-zstd], [disable to omit zstd compression]))
+        AS_HELP_STRING([--disable-zstd],[disable to omit zstd compression]))
 AH_TEMPLATE([SUPPORT_ZSTD],
 [Undefine if you do not want zstd compression.  By default this is defined.])
 if test x"$enable_zstd" != x"no"; then
@@ -549,7 +533,7 @@ fi
 
 AC_MSG_CHECKING([whether to enable LZ4 compression])
 AC_ARG_ENABLE([lz4],
-        AC_HELP_STRING([--disable-lz4], [disable to omit LZ4 compression]))
+        AS_HELP_STRING([--disable-lz4],[disable to omit LZ4 compression]))
 AH_TEMPLATE([SUPPORT_LZ4],
 [Undefine if you do not want LZ4 compression.  By default this is defined.])
 if test x"$enable_lz4" != x"no"; then
@@ -872,8 +856,8 @@ AC_CHECK_FUNCS(waitpid wait4 getcwd chown chmod lchmod mknod mkfifo \
     fchmod fstat ftruncate strchr readlink link utime utimes lutimes strftime \
     chflags getattrlist mktime innetgr linkat \
     memmove lchown vsnprintf snprintf vasprintf asprintf setsid strpbrk \
-    strlcat strlcpy strtol mallinfo mallinfo2 getgroups setgroups geteuid getegid \
-    setlocale setmode open64 lseek64 mkstemp64 mtrace va_copy __va_copy \
+    strlcat strlcpy strtol getgroups setgroups geteuid getegid \
+    setlocale setmode openat openat2 open64 lseek64 mkstemp64 mtrace va_copy __va_copy \
     seteuid strerror putenv iconv_open locale_charset nl_langinfo getxattr \
     extattr_get_link sigaction sigprocmask setattrlist getgrouplist \
     initgroups utimensat posix_fallocate attropen setvbuf nanosleep usleep \
