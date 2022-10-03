@@ -860,7 +860,7 @@ expand it.
     that until a bunch of recursive copying has finished).  However, these
     early directories don't yet have their completed mode, mtime, or ownership
     set -- they have more restrictive rights until the subdirectory's copying
-    actually begins.  This early-creation idiom can be avoiding by using the
+    actually begins.  This early-creation idiom can be avoided by using the
     [`--omit-dir-times`](#opt) option.
 
     Incremental recursion can be disabled using the
@@ -1560,6 +1560,15 @@ expand it.
     causing all files to be updated (though rsync's delta-transfer algorithm
     will make the update fairly efficient if the files haven't actually
     changed, you're much better off using `-t`).
+
+    A modern rsync that is using transfer protocol 30 or 31 conveys a modify
+    time using up to 8-bytes. If rsync is forced to speak an older protocol
+    (perhaps due to the remote rsync being older than 3.0.0) a modify time is
+    conveyed using 4-bytes. Prior to 3.2.7, these shorter values could convey
+    a date range of 13-Dec-1901 to 19-Jan-2038.  Beginning with 3.2.7, these
+    4-byte values now convey a date range of 1-Jan-1970 to 7-Feb-2106.  If you
+    have files dated older than 1970, make sure your rsync executables are
+    upgraded so that the full range of dates can be conveyed.
 
 0.  `--atimes`, `-U`
 
@@ -2400,6 +2409,8 @@ expand it.
 
     This option tells rsync to stop trying to protect the arg values on the
     remote side from unintended word-splitting or other misinterpretation.
+    It also allows the client to treat an empty arg as a "." instead of
+    generating an error.
 
     The default in a modern rsync is for "shell-active" characters (including
     spaces) to be backslash-escaped in the args that are sent to the remote
@@ -3540,13 +3551,17 @@ expand it.
 
     >     rsync -av --list-only foo* dest/
 
-    Starting with rsync 3.1.0, the sizes output by `--list-only` are affected
-    by the [`--human-readable`](#opt) option.  By default they will contain
-    digit separators, but higher levels of readability will output the sizes
-    with unit suffixes.  Note also that the column width for the size output
-    has increased from 11 to 14 characters for all human-readable levels.  Use
-    `--no-h` if you want just digits in the sizes, and the old column width of
-    11 characters.
+    This option always uses an output format that looks similar to this:
+
+    >     drwxrwxr-x          4,096 2022/09/30 12:53:11 support
+    >     -rw-rw-r--             80 2005/01/11 10:37:37 support/Makefile
+
+    The only option that affects this output style is (as of 3.1.0) the
+    [`--human-readable`](#opt) (`-h`) option.  The default is to output sizes
+    as byte counts with digit separators (in a 14-character-width column).
+    Specifying at least one `-h` option makes the sizes output with unit
+    suffixes.  If you want old-style bytecount sizes without digit separators
+    (and an 11-character-width column) use `--no-h`.
 
     Compatibility note: when requesting a remote listing of files from an rsync
     that is version 2.6.3 or older, you may encounter an error if you ask for a
