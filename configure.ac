@@ -4,20 +4,6 @@ AC_INIT([rsync],[ ],[https://rsync.samba.org/bug-tracking.html])
 
 AC_C_BIGENDIAN
 AC_HEADER_DIRENT
-m4_warn([obsolete],
-[Update your code to rely only on HAVE_SYS_TIME_H,
-then remove this warning and the obsolete code below it.
-All current systems provide time.h; it need not be checked for.
-Not all systems provide sys/time.h, but those that do, all allow
-you to include it and time.h simultaneously.])dnl
-AC_CHECK_HEADERS_ONCE([sys/time.h])
-# Obsolete code to be removed.
-if test $ac_cv_header_sys_time_h = yes; then
-  AC_DEFINE([TIME_WITH_SYS_TIME],[1],[Define to 1 if you can safely include both <sys/time.h>
-	     and <time.h>.  This macro is obsolete.])
-fi
-# End of obsolete code.
-
 AC_HEADER_SYS_WAIT
 AC_CHECK_HEADERS(sys/fcntl.h sys/select.h fcntl.h sys/time.h sys/unistd.h \
     unistd.h utime.h compat.h sys/param.h ctype.h sys/wait.h sys/stat.h \
@@ -390,7 +376,35 @@ if test x"$rsync_cv_HAVE_BROKEN_LARGEFILE" != x"yes"; then
    AC_SYS_LARGEFILE
 fi
 
-AC_DEFINE(INET6, 1, [true if you have IPv6])
+AC_MSG_CHECKING([whether to enable ipv6])
+AC_ARG_ENABLE(ipv6,
+AS_HELP_STRING([--disable-ipv6],[disable to omit ipv6 support]),
+[ case "$enableval" in
+  no)
+	AC_MSG_RESULT(no)
+	;;
+  *)	AC_MSG_RESULT(yes)
+	AC_DEFINE(INET6, 1, [true if you have IPv6])
+	;;
+  esac ],
+
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[ /* AF_INET6 availability check */
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+main()
+{
+   if (socket(AF_INET6, SOCK_STREAM, 0) < 0)
+     exit(1);
+   else
+     exit(0);
+}
+]])],
+  [AC_MSG_RESULT(yes)
+  AC_DEFINE(INET6, 1, true if you have IPv6)],
+  [AC_MSG_RESULT(no)],
+  [AC_MSG_RESULT(no)]
+))
 
 dnl Do you want to disable use of locale functions
 AC_ARG_ENABLE([locale],

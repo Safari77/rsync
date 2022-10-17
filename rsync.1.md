@@ -152,10 +152,16 @@ rsync daemon by leaving off the module name:
 
 >     rsync somehost.mydomain.com::
 
-## COPYING A SINGLE FILE
+## COPYING TO A DIFFERENT NAME
 
-Rsync has the ability to customize the destination file's name when copying a
-single item.  The rules for this are:
+When you want to copy a directory to a different name, use a trailing slash on
+the source directory to put the contents of the directory into any destination
+directory you like:
+
+>     rsync -ai foo/ bar/
+
+Rsync also has the ability to customize a destination file's name when copying
+a single item.  The rules for this are:
 
 - The transfer list must consist of a single item (either a file or an empty
   directory)
@@ -163,30 +169,26 @@ single item.  The rules for this are:
 - The destination path must not have been specified with a trailing slash
 
 Under those circumstances, rsync will set the name of the destination's single
-item to the last element of the destination path.
+item to the last element of the destination path.  Keep in mind that it is best
+to only use this idiom when copying a file and use the above trailing-slash
+idiom when copying a directory.
 
-For example, the following will copy the foo.c file as bar.c in the "dest" dir
-(assuming that bar.c isn't a directory):
+The following example copies the `foo.c` file as `bar.c` in the `save` dir
+(assuming that `bar.c` isn't a directory):
 
->     rsync -ai src/foo.c dest/bar.c
+>     rsync -ai src/foo.c save/bar.c
 
-This rule might accidentally bite you if you unknowingly copy a single item and
-specify a destination dir that doesn't exist (without using a trailing slash).
-For example:
+The single-item copy rule might accidentally bite you if you unknowingly copy a
+single item and specify a destination dir that doesn't exist (without using a
+trailing slash).  For example, if `src/*.c` matches one file and `save/dir`
+doesn't exist, this will confuse you by naming the destination file `save/dir`:
 
->     rsync -ai src/*.c dest/dir
+>     rsync -ai src/*.c save/dir
 
-If the `*.c` only matched one file and dest/dir does not yet exist, then rsync
-copies the single .c file to the name "dir" in "dest".  To prevent this, it is
-safest to specify a destination path with a trailing slash when you want it to
-be treated as a directory:
+To prevent such an accident, either make sure the destination dir exists or
+specify the destination path with a trailing slash:
 
->     rsync -ai src/*.c dest/dir/
-
-If you want to copy a **non-empty** directory to a different name, specify the
-source path with a trailing slash:
-
->     rsync -ai foo/ bar
+>     rsync -ai src/*.c save/dir/
 
 ## SORTED TRANSFER ORDER
 
@@ -434,7 +436,7 @@ has its own detailed description later in this manpage.
 --append-verify          --append w/old data in file checksum
 --dirs, -d               transfer directories without recursing
 --old-dirs, --old-d      works like --dirs when talking to old rsync
---mkpath                 create the destination's path component
+--mkpath                 create destination's missing path components
 --links, -l              copy symlinks as symlinks
 --copy-links, -L         transform symlink into referent file/dir
 --copy-unsafe-links      only "unsafe" symlinks are transformed
@@ -1148,23 +1150,25 @@ expand it.
 
 0.  `--mkpath`
 
-    Create a missing path component of the destination path. By default, rsync
-    allows only the final element of the destination path to not exist, which
-    is an attempt to help you to validate your destination path.  With this
-    option, rsync creates all the missing destination-path components just as
-    if `mkdir -p $DEST_PATH` had been run.
+    Create all missing path components of the destination path.
+
+    By default, rsync allows only the final component of the destination path
+    to not exist, which is an attempt to help you to validate your destination
+    path.  With this option, rsync creates all the missing destination-path
+    components, just as if `mkdir -p $DEST_PATH` had been run on the receiving
+    side.
 
     When specifying a destination path, including a trailing slash ensures that
-    rsync always treats the whole path as the directory name to be created,
-    even if the source arg is a single filename. See the [COPYING A SINGLE
-    FILE](#) section for full details on how rsync decides if a final
-    destination path element is a directory or not.
+    the whole path is treated as directory names to be created, even when the
+    file list has a single item. See the [COPYING TO A DIFFERENT NAME](#)
+    section for full details on how rsync decides if a final destination-path
+    component should be created as a directory or not.
 
     If you would like the newly-created destination dirs to match the dirs on
     the sending side, you should be using [`--relative`](#opt) (`-R`) instead
     of `--mkpath`.  For instance, the following two commands result in the same
-    destination tree, but it is only the second command that ensures that the
-    "some/extra/path" elements match the dirs on the sending side:
+    destination tree, but only the second command ensures that the
+    "some/extra/path" components match the dirs on the sending side:
 
     >     rsync -ai --mkpath host:some/extra/path/*.c some/extra/path/
     >     rsync -aiR host:some/extra/path/*.c ./
