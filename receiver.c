@@ -3,7 +3,7 @@
  *
  * Copyright (C) 1996-2000 Andrew Tridgell
  * Copyright (C) 1996 Paul Mackerras
- * Copyright (C) 2003-2022 Wayne Davison
+ * Copyright (C) 2003-2023 Wayne Davison
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -372,7 +372,7 @@ static int receive_data(int f_in, char *fname_r, int fd_r, OFF_T size_r,
 
 	if (fd != -1 && offset > 0) {
 		if (sparse_files > 0) {
-			if (sparse_end(fd, offset) != 0)
+			if (sparse_end(fd, offset, updating_basis_or_equiv) != 0)
 				goto report_write_error;
 		} else if (flush_write_file(fd) < 0) {
 		    report_write_error:
