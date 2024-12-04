@@ -982,7 +982,7 @@ static int set_rsync_acl(const char *fname, acl_duo *duo_item,
 		 && !pack_smb_acl(&duo_item->sacl, &duo_item->racl))
 			return -1;
 #ifdef HAVE_OSX_ACLS
-		mode = 0; /* eliminate compiler warning */
+		(void)mode; /* eliminate compiler warning */
 #else
 		if (type == SMB_ACL_TYPE_ACCESS) {
 			cur_mode = change_sacl_perms(duo_item->sacl, &duo_item->racl, cur_mode, mode);

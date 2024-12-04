@@ -2,13 +2,25 @@
 
 ## Changes in this version:
 
+### SECURITY FIXES:
+
+- Fixed a buffer overflow when the sum2 digest algorithm is SHA1.
+
 ### BUG FIXES:
 
 - Fixed the included popt to avoid a memory error on modern gcc versions.
 
+- Fixed an incorrect extern variable's type that caused an ACL issue on macOS.
+
 ### INTERNAL:
 
- - Updated included popt to version 1.19.
+- Updated included popt to version 1.19.
+
+### DEVELOPER RELATED:
+
+- Various improvements to the release scripts and git setup.
+
+- Improved packaging/var-checker to identify variable type issues.
 
 ------------------------------------------------------------------------------
 
@@ -4776,7 +4788,7 @@
 
 | RELEASE DATE | VER.   | DATE OF COMMIT\* | PROTOCOL    |
 |--------------|--------|------------------|-------------|
-| ?? Apr 2024  | 3.3.1  |                  | 31          |
+| ?? Nov 2024  | 3.3.1  |                  | 31          |
 | 06 Apr 2024  | 3.3.0  |                  | 31          |
 | 20 Oct 2022  | 3.2.7  |                  | 31          |
 | 09 Sep 2022  | 3.2.6  |                  | 31          |
