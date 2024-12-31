@@ -345,6 +345,17 @@ static int unlink_and_reopen(const char *dest, mode_t mode)
 	return ofd;
 }
 
+static int fsync_check(int fd)
+{
+        int ret;
+
+        do {
+                ret = fsync(fd);
+        } while ((ret == -1) && (errno == EINTR));
+        if ((ret == -1) && (errno == EINVAL)) return 0;
+        return ret;
+}
+
 /* Copy contents of file @source to file @dest with mode @mode.
  *
  * If @tmpfilefd is < 0, copy_file unlinks @dest and then opens a new
@@ -439,7 +450,7 @@ int copy_file(const char *source, const char *dest, int tmpfilefd, mode_t mode)
 #endif
 	}
 
-	if (do_fsync && fsync(ofd) < 0) {
+	if (do_fsync && fsync_check(ofd) < 0) {
 		int save_errno = errno;
 		rsyserr(FERROR, errno, "fsync failed on %s", full_fname(dest));
 		close(ofd);
