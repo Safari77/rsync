@@ -83,6 +83,7 @@
 #define FLAG_DUPLICATE (1<<4)	/* sender */
 #define FLAG_MISSING_DIR (1<<4)	/* generator */
 #define FLAG_HLINKED (1<<5)	/* receiver/generator (checked on all types) */
+#define FLAG_GOT_DIR_FLIST (1<<5)/* sender/receiver/generator - dir_flist only */
 #define FLAG_HLINK_FIRST (1<<6)	/* receiver/generator (w/FLAG_HLINKED) */
 #define FLAG_IMPLIED_DIR (1<<6)	/* sender/receiver/generator (dirs only) */
 #define FLAG_HLINK_LAST (1<<7)	/* receiver/generator */
@@ -109,7 +110,7 @@
 
 /* Update this if you make incompatible changes and ALSO update the
  * SUBPROTOCOL_VERSION if it is not a final (official) release. */
-#define PROTOCOL_VERSION 31
+#define PROTOCOL_VERSION 32
 
 /* This is used when working on a new protocol version or for any unofficial
  * protocol tweaks.  It should be a non-zero value for each pre-release repo
