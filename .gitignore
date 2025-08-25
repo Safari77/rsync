@@ -71,3 +71,4 @@ aclocal.m4
 /auto-build-save
 .deps
 /*.exe
+*.dSYM/
