@@ -953,7 +953,7 @@ int count_dir_elements(const char *p)
  * resulting name would be empty, returns ".". */
 int clean_fname(char *name, int flags)
 {
-	char *limit, *t = name, *f = name;
+	char *limit = name, *t = name, *f = name;
 	int anchored;
 
 	if (!name)
@@ -999,9 +999,13 @@ int clean_fname(char *name, int flags)
 					f += 2;
 					continue;
 				}
-				while (s > limit && *--s != '/') {}
-				if (s != t - 1 && (s < name || *s == '/')) {
-					t = s + 1;
+				/* backing up for ".." — avoid reading before 'name' */
+				while (s > limit && s[-1] != '/')
+					s--;
+
+				/* If found prior '/', or we reached the start, adjust t. */
+				if (s != t - 1 && (s <= name || *s == '/')) {
+					t = (s == name) ? name : s + 1;
 					f += 2;
 					continue;
 				}
@@ -1400,7 +1404,7 @@ char *timestring(time_t t)
 {
 	struct tm tmbuf;
 	static int ndx = 0;
-	static char buffers[4][20]; /* We support 4 simultaneous timestring results. */
+	static char buffers[4][80]; /* We support 4 simultaneous timestring results. */
 	char *TimeBuf = buffers[ndx = (ndx + 1) % 4];
 	localtime_r(&t, &tmbuf);
 
