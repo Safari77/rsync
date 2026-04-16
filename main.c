@@ -785,11 +785,37 @@ static char *get_local_name(struct file_list *flist, char *dest_path)
 		}
 
 		if (do_mkdir(dest_path, ACCESSPERMS) != 0) {
+			if (errno == EEXIST) {
+				STRUCT_STAT st;
+				if (do_stat(dest_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+					int fix_failed = 0;
+
+					/* Attempt to fix ownership if it doesn't match */
+					if (st.st_uid != our_uid) {
+						if (chown(dest_path, our_uid, (gid_t)-1) < 0) {
+							fix_failed = 1;
+						}
+					}
+
+					/* Attempt to fix permissions if they don't match */
+					if (!fix_failed && (st.st_mode & ACCESSPERMS) != (ACCESSPERMS & ~orig_umask)) {
+						if (chmod(dest_path, ACCESSPERMS & ~orig_umask) < 0) {
+							fix_failed = 1;
+						}
+					}
+
+					if (!fix_failed) {
+						goto skip_mkdir_error;
+					}
+				}
+			}
 		    mkdir_error:
 			rsyserr(FERROR, errno, "mkdir %s failed",
 				full_fname(dest_path));
 			exit_cleanup(RERR_FILEIO);
 		}
+		skip_mkdir_error:
+
 
 		if (flist->high >= flist->low
 		 && strcmp(flist->files[flist->low]->basename, ".") == 0)

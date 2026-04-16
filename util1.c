@@ -34,6 +34,8 @@ extern int relative_paths;
 extern int preserve_xattrs;
 extern int omit_link_times;
 extern int preallocate_files;
+extern uid_t our_uid;
+extern mode_t orig_umask;
 extern char *module_dir;
 extern unsigned int module_dirlen;
 extern char *partial_dir;
@@ -253,8 +255,33 @@ int make_path(char *fname, int flags)
 		p += strlen(p);
 		if (ret < 0) /* Skip mkdir on error, but keep restoring the path. */
 			continue;
-		if (do_mkdir(fname, ACCESSPERMS) < 0)
+		if (do_mkdir(fname, ACCESSPERMS) < 0) {
+			if (errno == EEXIST) {
+				STRUCT_STAT st;
+				if (do_stat(fname, &st) == 0 && S_ISDIR(st.st_mode)) {
+					int fix_failed = 0;
+
+					/* Attempt to fix ownership if it doesn't match */
+					if (st.st_uid != our_uid) {
+						if (chown(fname, our_uid, (gid_t)-1) < 0) {
+							fix_failed = 1;
+						}
+					}
+
+					/* Attempt to fix permissions if they don't match */
+					if (!fix_failed && (st.st_mode & ACCESSPERMS) != (ACCESSPERMS & ~orig_umask)) {
+						if (chmod(fname, ACCESSPERMS & ~orig_umask) < 0) {
+							fix_failed = 1;
+						}
+					}
+
+					if (!fix_failed) {
+						continue; /* Successfully verified or fixed, move to next dir */
+					}
+				}
+			}
 			ret = -ret - 1;
+		}
 		else
 			ret++;
 	}
