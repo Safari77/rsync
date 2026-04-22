@@ -90,10 +90,6 @@ char *full_module_path;
 static int rl_nulls = 0;
 static int namecvt_fd_req = -1, namecvt_fd_ans = -1;
 
-#ifdef HAVE_SIGACTION
-static struct sigaction sigact;
-#endif
-
 static item_list gid_list = EMPTY_ITEM_LIST;
 
 /* Used when "reverse lookup" is off. */
