@@ -1402,15 +1402,14 @@ int unsafe_symlink(const char *dest, const char *src)
 /* Return the date and time as a string.  Some callers tweak returned buf. */
 char *timestring(time_t t)
 {
-	struct tm tmbuf;
 	static int ndx = 0;
 	static char buffers[4][80]; /* We support 4 simultaneous timestring results. */
 	char *TimeBuf = buffers[ndx = (ndx + 1) % 4];
-	localtime_r(&t, &tmbuf);
-
-	snprintf(TimeBuf, sizeof buffers[0], "%4d/%02d/%02d %02d:%02d:%02d",
-		 (int)tmbuf.tm_year + 1900, (int)tmbuf.tm_mon + 1, (int)tmbuf.tm_mday,
-		 (int)tmbuf.tm_hour, (int)tmbuf.tm_min, (int)tmbuf.tm_sec);
+	struct tm tmp, *tm = localtime_r(&t, &tmp);
+	int len = snprintf(TimeBuf, sizeof buffers[0], "%4d/%02d/%02d %02d:%02d:%02d",
+		 (int)tm->tm_year + 1900, (int)tm->tm_mon + 1, (int)tm->tm_mday,
+		 (int)tm->tm_hour, (int)tm->tm_min, (int)tm->tm_sec);
+	assert(len > 0); /* Silence gcc warning */
 	return TimeBuf;
 }
 
@@ -1730,6 +1729,8 @@ void *expand_item_list(item_list *lp, size_t item_size, const char *desc, int in
 				new_ptr == lp->items ? " not" : "");
 		}
 
+		memset((char *)new_ptr + lp->malloced * item_size, 0,
+		       (expand_size - lp->malloced) * item_size);
 		lp->items = new_ptr;
 		lp->malloced = expand_size;
 	}

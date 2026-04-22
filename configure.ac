@@ -20,7 +20,7 @@ AC_HEADER_MAJOR_FIXED
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([byteorder.h])
 AC_CONFIG_HEADERS([config.h])
-AC_PREREQ([2.71])
+AC_PREREQ([2.72])
 
 PACKAGE_VERSION=`sed -n 's/.*RSYNC_VERSION.*"\(.*\)".*/\1/p' <$srcdir/version.h`
 
