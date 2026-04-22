@@ -2110,7 +2110,7 @@ void write_varint(int f, int32 x)
 
 void write_varlong(int f, int64 x, uchar min_bytes)
 {
-	char b[9];
+	char b[9] = {0}; // Silence gcc
 	uchar bit;
 	int cnt = 8;
 
