@@ -33,6 +33,11 @@
 #include <sys/syscall.h>
 #endif
 
+#ifdef __linux__
+#include <sys/syscall.h>
+#include <linux/openat2.h>
+#endif
+
 #include "ifuncs.h"
 
 extern int dry_run;
@@ -720,12 +725,79 @@ int do_open_nofollow(const char *pathname, int flags)
 /*
   open a file relative to a base directory. The basedir can be NULL,
   in which case the current working directory is used. The relpath
-  must be a relative path, and the relpath must not contain any
-  elements in the path which follow symlinks (ie. like O_NOFOLLOW, but
-  applies to all path components, not just the last component)
+  must be a relative path. The kernel must guarantee that resolution
+  cannot escape basedir (or the cwd, when basedir is NULL): no ".."
+  jumps above the start, no symlinks pointing outside, no absolute
+  paths, no /proc magic-link tricks.
 
-  The relpath must also not contain any ../ elements in the path
+  Symlinks *within* basedir are followed normally — earlier rsync
+  versions rejected every symlink with O_NOFOLLOW on each component,
+  which broke legitimate directory symlinks on the receiver side
+  (https://github.com/RsyncProject/rsync/issues/715). The escape
+  prevention is handled by:
+    Linux 5.6+:                openat2(RESOLVE_BENEATH)
+    FreeBSD 13+:               openat() with O_RESOLVE_BENEATH
+    macOS 15+ / iOS 18+:       openat() with O_RESOLVE_BENEATH (same
+                               flag name, picked up by the same #ifdef;
+                               flag value differs from FreeBSD)
+  Other systems fall back to the per-component O_NOFOLLOW walk below.
+
+  The relpath must also not contain any ../ elements in the path.
 */
+
+#ifdef __linux__
+static int secure_relative_open_linux(const char *basedir, const char *relpath, int flags, mode_t mode)
+{
+	struct open_how how;
+	int dirfd, retfd;
+
+	memset(&how, 0, sizeof how);
+	how.flags = flags;
+	how.mode = mode;
+	how.resolve = RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS;
+
+	if (basedir == NULL) {
+		dirfd = AT_FDCWD;
+	} else {
+		dirfd = openat(AT_FDCWD, basedir, O_RDONLY | O_DIRECTORY);
+		if (dirfd == -1)
+			return -1;
+	}
+
+	retfd = syscall(SYS_openat2, dirfd, relpath, &how, sizeof how);
+
+	if (dirfd != AT_FDCWD)
+		close(dirfd);
+	return retfd;
+}
+#endif
+
+#ifdef O_RESOLVE_BENEATH
+/* FreeBSD 13+ and macOS 15+ (Sequoia) / iOS 18+: O_RESOLVE_BENEATH is
+ * an openat() flag with the same "must not escape dirfd" semantics as
+ * Linux's RESOLVE_BENEATH. The kernel rejects ".." escapes, absolute
+ * symlinks, and symlinks whose target lies outside dirfd. (FreeBSD and
+ * Apple use different flag bit values, but the same symbolic name.) */
+static int secure_relative_open_resolve_beneath(const char *basedir, const char *relpath, int flags, mode_t mode)
+{
+	int dirfd, retfd;
+
+	if (basedir == NULL) {
+		dirfd = AT_FDCWD;
+	} else {
+		dirfd = openat(AT_FDCWD, basedir, O_RDONLY | O_DIRECTORY);
+		if (dirfd == -1)
+			return -1;
+	}
+
+	retfd = openat(dirfd, relpath, flags | O_RESOLVE_BENEATH, mode);
+
+	if (dirfd != AT_FDCWD)
+		close(dirfd);
+	return retfd;
+}
+#endif
+
 int secure_relative_open(const char *basedir, const char *relpath, int flags, mode_t mode)
 {
 	if (!relpath || relpath[0] == '/') {
@@ -738,6 +810,20 @@ int secure_relative_open(const char *basedir, const char *relpath, int flags, mo
 		errno = EINVAL;
 		return -1;
 	}
+
+#ifdef __linux__
+	{
+		int fd = secure_relative_open_linux(basedir, relpath, flags, mode);
+		/* ENOSYS = kernel < 5.6 doesn't have the syscall even though
+		 * glibc/kernel-headers do; fall through to the portable path. */
+		if (fd != -1 || errno != ENOSYS)
+			return fd;
+	}
+#endif
+
+#ifdef O_RESOLVE_BENEATH
+	return secure_relative_open_resolve_beneath(basedir, relpath, flags, mode);
+#endif
 
 #if !defined(O_NOFOLLOW) || !defined(O_DIRECTORY) || !defined(AT_FDCWD)
 	// really old system, all we can do is live with the risks
