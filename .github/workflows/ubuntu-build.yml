@@ -1,27 +1,23 @@
-name: Test rsync on Ubuntu 22.04
-
-# Older-LTS coverage to help with backporting security fixes. ubuntu-22.04
-# is currently the oldest GitHub Actions runner image (20.04 was retired
-# in April 2025).
+name: Test rsync on Ubuntu
 
 on:
   push:
     branches: [ master ]
     paths-ignore:
       - '.github/workflows/*.yml'
-      - '!.github/workflows/ubuntu-22.04-build.yml'
+      - '!.github/workflows/ubuntu-build.yml'
   pull_request:
     branches: [ master ]
     paths-ignore:
       - '.github/workflows/*.yml'
-      - '!.github/workflows/ubuntu-22.04-build.yml'
+      - '!.github/workflows/ubuntu-build.yml'
   schedule:
     - cron: '42 8 * * *'
 
 jobs:
   test:
-    runs-on: ubuntu-22.04
-    name: Test rsync on Ubuntu 22.04
+    runs-on: ubuntu-latest
+    name: Test rsync on Ubuntu
     steps:
     - uses: actions/checkout@v4
       with:
@@ -45,15 +41,17 @@ jobs:
     - name: check29
       run: sudo RSYNC_EXPECT_SKIPPED=crtimes,daemon-chroot-acl,proxy-response-line-too-long make check29
     - name: check (TCP daemon transport)
-      # Second run with daemon tests over a real loopback rsyncd; the default
-      # 'make check' above uses the secure stdio-pipe transport.
+      # Second run with daemon tests over a real loopback rsyncd. The default
+      # 'make check' above uses the secure stdio-pipe transport (no listening
+      # sockets); this run exercises the real TCP accept/auth path. Skip-set
+      # is env-dependent here (chroot-acl), so leave RSYNC_EXPECT_SKIPPED unset.
       run: sudo ./runtests.py --rsync-bin=`pwd`/rsync --use-tcp -j 8
     - name: ssl file list
       run: rsync-ssl --no-motd download.samba.org::rsyncftp/ || true
     - name: save artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ubuntu-22.04-bin
+        name: ubuntu-bin
         path: |
           rsync
           rsync-ssl

@@ -62,7 +62,8 @@ CHECK_PROGS = rsync$(EXEEXT) tls$(EXEEXT) getgroups$(EXEEXT) getfsdev$(EXEEXT) \
 	testrun$(EXEEXT) trimslash$(EXEEXT) t_unsafe$(EXEEXT) t_chmod_secure$(EXEEXT) \
 	t_secure_relpath$(EXEEXT) wildtest$(EXEEXT) simdtest$(EXEEXT)
 
-CHECK_SYMLINKS = testsuite/chown-fake.test testsuite/devices-fake.test testsuite/xattrs-hlink.test
+CHECK_SYMLINKS = testsuite/chown-fake_test.py testsuite/devices-fake_test.py \
+	testsuite/xattrs-hlink_test.py testsuite/exclude-lsh_test.py
 
 # Objects for CHECK_PROGS to clean
 CHECK_OBJS=tls.o testrun.o getgroups.o getfsdev.o t_stub.o t_unsafe.o t_chmod_secure.o t_secure_relpath.o trimslash.o wildtest.o
@@ -321,17 +322,21 @@ test: check
 # catch Bash-isms earlier even if we're running on GNU.  Of course, we
 # might lose in the future where POSIX diverges from old sh.
 
+# `make check` runs tests in parallel by default. Override with
+# `make check CHECK_J=1` (serial) or any other value.
+CHECK_J = 8
+
 .PHONY: check
 check: all $(CHECK_PROGS) $(CHECK_SYMLINKS)
-	$(srcdir)/runtests.py --rsync-bin=`pwd`/rsync$(EXEEXT)
+	$(srcdir)/runtests.py --rsync-bin=`pwd`/rsync$(EXEEXT) -j $(CHECK_J)
 
 .PHONY: check29
 check29: all $(CHECK_PROGS) $(CHECK_SYMLINKS)
-	$(srcdir)/runtests.py --rsync-bin=`pwd`/rsync$(EXEEXT) --protocol=29
+	$(srcdir)/runtests.py --rsync-bin=`pwd`/rsync$(EXEEXT) -j $(CHECK_J) --protocol=29
 
 .PHONY: check30
 check30: all $(CHECK_PROGS) $(CHECK_SYMLINKS)
-	$(srcdir)/runtests.py --rsync-bin=`pwd`/rsync$(EXEEXT) --protocol=30
+	$(srcdir)/runtests.py --rsync-bin=`pwd`/rsync$(EXEEXT) -j $(CHECK_J) --protocol=30
 
 wildtest.o: wildtest.c t_stub.o lib/wildmatch.c rsync.h config.h
 wildtest$(EXEEXT): wildtest.o lib/compat.o lib/snprintf.o @BUILD_POPT@
@@ -345,14 +350,17 @@ simdtest$(EXEEXT): simd-checksum-x86_64.cpp $(HEADERS)
 	    touch $@; \
 	fi
 
-testsuite/chown-fake.test:
-	ln -s chown.test $(srcdir)/testsuite/chown-fake.test
+testsuite/chown-fake_test.py:
+	ln -s chown_test.py $(srcdir)/testsuite/chown-fake_test.py
 
-testsuite/devices-fake.test:
-	ln -s devices.test $(srcdir)/testsuite/devices-fake.test
+testsuite/devices-fake_test.py:
+	ln -s devices_test.py $(srcdir)/testsuite/devices-fake_test.py
 
-testsuite/xattrs-hlink.test:
-	ln -s xattrs.test $(srcdir)/testsuite/xattrs-hlink.test
+testsuite/xattrs-hlink_test.py:
+	ln -s xattrs_test.py $(srcdir)/testsuite/xattrs-hlink_test.py
+
+testsuite/exclude-lsh_test.py:
+	ln -s exclude_test.py $(srcdir)/testsuite/exclude-lsh_test.py
 
 # This does *not* depend on building or installing: you can use it to
 # check a version installed from a binary or some other source tree,
@@ -360,7 +368,7 @@ testsuite/xattrs-hlink.test:
 
 .PHONY: installcheck
 installcheck: $(CHECK_PROGS) $(CHECK_SYMLINKS)
-	$(srcdir)/runtests.py --rsync-bin="$(bindir)/rsync$(EXEEXT)" --srcdir="$(srcdir)" --tooldir=`pwd`
+	$(srcdir)/runtests.py --rsync-bin="$(bindir)/rsync$(EXEEXT)" --srcdir="$(srcdir)" --tooldir=`pwd` -j $(CHECK_J)
 
 # TODO: Add 'dist' target; need to know which files will be included
 
