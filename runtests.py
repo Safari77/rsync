@@ -323,6 +323,12 @@ def main():
     if not srcdir or srcdir == '.':
         srcdir = tooldir
     rsync_bin = args.rsync_bin or os.environ.get('rsync_bin') or os.path.join(tooldir, 'rsync')
+    # Absolutize: tests run with subprocess(cwd=TOOLDIR) below, so a relative
+    # argv[0] would re-resolve against TOOLDIR rather than the runner's
+    # invocation cwd, breaking --rsync-bin=../foo/rsync forms.  abspath()
+    # captures os.getcwd() now, which is what the operator intended.
+    if rsync_bin and not os.path.isabs(rsync_bin):
+        rsync_bin = os.path.abspath(rsync_bin)
 
     suitedir = os.path.join(srcdir, 'testsuite')
     scratchbase = os.path.join(os.environ.get('scratchbase', tooldir), 'testtmp')
@@ -528,8 +534,15 @@ def main():
     print('-' * 60)
 
     exit_code = failed + vg_errors
-    if exit_code == 0 and skipped_str != args.expect_skipped:
-        exit_code = 1
+    if exit_code == 0:
+        # Compare the skipped set order-insensitively: which tests skipped is
+        # what matters, not the order runtests happened to collect them in
+        # (that order is just sorted filenames -- an easy thing to get subtly
+        # wrong when maintaining the per-platform expected lists).
+        got = set(s for s in skipped_str.split(',') if s)
+        want = set(s for s in args.expect_skipped.split(',') if s)
+        if got != want:
+            exit_code = 1
 
     print(f'overall result is {exit_code}')
     sys.exit(exit_code)

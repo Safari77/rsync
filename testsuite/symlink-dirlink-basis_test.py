@@ -14,20 +14,27 @@
 
 import filecmp
 import os
-import platform
 import subprocess
 import time
 
 from rsyncfns import (
     RSYNC, SCRATCHDIR, SRCDIR, TMPDIR,
-    make_data_file, rsync_argv, test_fail, test_skipped,
+    make_data_file, resolve_beneath_supported, rsync_argv, test_fail,
+    test_skipped,
 )
 
 
-if platform.system() in ('SunOS', 'OpenBSD', 'NetBSD') or platform.system().startswith('CYGWIN'):
+# Following an in-tree directory symlink under the secure resolver needs a
+# kernel "beneath" primitive (RESOLVE_BENEATH/O_RESOLVE_BENEATH). Probe the
+# actual binary rather than guessing from the platform name: this also skips
+# correctly on Linux < 5.6, a seccomp-blocked openat2, and a --disable-openat2
+# build, where the portable O_NOFOLLOW fallback rejects the in-tree symlink
+# (issue #715).
+if not resolve_beneath_supported():
     test_skipped(
-        f"secure_relative_open lacks RESOLVE_BENEATH equivalent on "
-        f"{platform.system()}; issue #715 still affects this platform"
+        "this rsync can't follow an in-tree directory symlink under its "
+        "secure resolver (no RESOLVE_BENEATH equivalent / --disable-openat2); "
+        "issue #715 still affects this configuration"
     )
 
 os.environ['RSYNC_RSH'] = str(SRCDIR / 'support' / 'lsh.sh')
@@ -125,6 +132,7 @@ make_testfile(srcbase / 'dir' / 'file')
 
 push('-KRlptv', 'dir/file', 'localhost:', label="test 4 initial")
 
+old_content = (srcbase / 'dir' / 'file').read_bytes()   # the backup should hold this
 with open(srcbase / 'dir' / 'file', 'ab') as f:
     f.write(b"backup update\n")
 time.sleep(1)
@@ -134,6 +142,9 @@ push('-KRlptv', '--backup', 'dir/file', 'localhost:', label="test 4 update")
 assert_same("test 4 update", srcbase / 'dir' / 'file', home / 'real-dir' / 'file')
 if not (home / 'real-dir' / 'file~').is_file():
     test_fail("test 4: backup file was not created")
+# The backup must hold the OLD content, not just exist.
+if (home / 'real-dir' / 'file~').read_bytes() != old_content:
+    test_fail("test 4: backup file~ does not hold the pre-update content")
 
 
 # Test 5: --inplace.
