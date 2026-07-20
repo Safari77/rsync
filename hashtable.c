@@ -123,24 +123,24 @@ struct ht_int64_node *hashtable_find(struct hashtable *tbl, int64 key, void *dat
 		free(old_nodes);
 	}
 
-	/* Based on Jenkins hashword() from lookup3.c. */
-	uint32 a, b, c;
-
-	/* Set up the internal state */
-	a = b = c = 0xdeadbeef + (8 << 2);
-
 #if SIZEOF_INT64 >= 8
-	b += (uint32)(key >> 32);
+	/* Pelle Evensen's Moremur */
+	uint64_t h = (uint64_t)key;
+	h ^= h >> 27;
+	h *= 0x3C79AC492BA7B653ULL;
+	h ^= h >> 33;
+	h *= 0x1C69B3F74AC4AE35ULL;
+	h ^= h >> 27;
+	ndx = (uint32_t)h;
+#else
+	uint32_t h = (uint32_t)key;
+	h ^= h >> 16;
+	h *= 0x21f0aaad;
+	h ^= h >> 15;
+	h *= 0xf35a2d97;
+	h ^= h >> 15;
+	ndx = h;
 #endif
-	a += (uint32)key;
-	c ^= b; c -= rot(b, 14);
-	a ^= c; a -= rot(c, 11);
-	b ^= a; b -= rot(a, 25);
-	c ^= b; c -= rot(b, 16);
-	a ^= c; a -= rot(c, 4);
-	b ^= a; b -= rot(a, 14);
-	c ^= b; c -= rot(b, 24);
-	ndx = c;
 
 	/* If it already exists, return the node.  If we're not
 	 * allocating, return NULL if the key is not found. */
