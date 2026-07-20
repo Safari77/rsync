@@ -697,19 +697,10 @@ typedef unsigned int size_t;
 # define SIZEOF_INT64 SIZEOF_OFF_T
 #endif
 
-#define HT_KEY32 0
-#define HT_KEY64 1
-
 struct hashtable {
 	void *nodes;
 	int32 size, entries;
 	uint32 node_size;
-	short key64;
-};
-
-struct ht_int32_node {
-	void *data;
-	int32 key;
 };
 
 struct ht_int64_node {
@@ -717,9 +708,15 @@ struct ht_int64_node {
 	int64 key;
 };
 
-#define HT_NODE(tbl, bkts, i) ((void*)((char*)(bkts) + (i)*(tbl)->node_size))
-#define HT_KEY(node, k64) ((k64)? ((struct ht_int64_node*)(node))->key \
-			 : (int64)((struct ht_int32_node*)(node))->key)
+static inline void *ht_node(struct hashtable *tbl, void *bkts, size_t i)
+{
+	return (char*)bkts + i * tbl->node_size;
+}
+
+static inline int64 ht_key(struct ht_int64_node *node)
+{
+	return node->key;
+}
 
 #ifndef MIN
 #define MIN(a,b) ((a)<(b)?(a):(b))

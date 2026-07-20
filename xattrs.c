@@ -385,16 +385,14 @@ static int64 xattr_lookup_hash(const item_list *xalp)
 {
 	const rsync_xa *rxas = xalp->items;
 	size_t i;
-	/* Accumulate unsigned: the summed hash values routinely overflow a
-	 * signed int64 (UB), and we only care about the resulting bit pattern. */
-	uint64_t key = (uint64_t)hashlittle2(&xalp->count, sizeof xalp->count);
+	uint64_t key = hashlittle2(&xalp->count, sizeof xalp->count);
 
 	for (i = 0; i < xalp->count; i++) {
-		key += (uint64_t)hashlittle2(rxas[i].name, rxas[i].name_len);
+		key += hashlittle2(rxas[i].name, rxas[i].name_len);
 		if (rxas[i].datum_len > MAX_FULL_DATUM)
-			key += (uint64_t)hashlittle2(rxas[i].datum, xattr_sum_len);
+			key += hashlittle2(rxas[i].datum, xattr_sum_len);
 		else
-			key += (uint64_t)hashlittle2(rxas[i].datum, rxas[i].datum_len);
+			key += hashlittle2(rxas[i].datum, rxas[i].datum_len);
 	}
 
 	return (int64)key;
@@ -476,7 +474,7 @@ static int rsync_xal_store(item_list *xalp)
 	new_list->key = xattr_lookup_hash(&new_list->xa_items);
 
 	if (rsync_xal_h == NULL)
-		rsync_xal_h = hashtable_create(512, HT_KEY64);
+		rsync_xal_h = hashtable_create(512);
 
 	new_ref = new0(rsync_xa_list_ref);
 	new_ref->ndx = ndx;

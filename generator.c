@@ -310,7 +310,7 @@ static void delete_in_dir(char *fbuf, struct file_struct *file, dev_t fs_dev)
 
 	if (one_file_system) {
 		if (!dev_tbl)
-			dev_tbl = hashtable_create(16, HT_KEY64);
+			dev_tbl = hashtable_create(16);
 		if (file->flags & FLAG_TOP_DIR) {
 			hashtable_find(dev_tbl, fs_dev+1, "");
 			filesystem_dev = fs_dev;

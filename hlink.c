@@ -59,9 +59,9 @@ static struct file_list *hlink_flist;
 void init_hard_links(void)
 {
 	if (am_sender || protocol_version < 30)
-		dev_tbl = hashtable_create(16, HT_KEY64);
+		dev_tbl = hashtable_create(16);
 	else if (inc_recurse)
-		prior_hlinks = hashtable_create(1024, HT_KEY32);
+		prior_hlinks = hashtable_create(1024);
 }
 
 struct ht_int64_node *idev_find(int64 dev, int64 ino)
@@ -73,7 +73,7 @@ struct ht_int64_node *idev_find(int64 dev, int64 ino)
 		/* We keep a separate hash table of inodes for every device. */
 		dev_node = hashtable_find(dev_tbl, dev+1, data_when_new);
 		if (dev_node->data == data_when_new) {
-			dev_node->data = hashtable_create(512, HT_KEY64);
+			dev_node->data = hashtable_create(512);
 			if (DEBUG_GTE(HLINK, 3)) {
 				rprintf(FINFO, "[%s] created hashtable for dev %s\n",
 					who_am_i(), big_num(dev));
@@ -89,7 +89,7 @@ void idev_destroy(void)
 	int i;
 
 	for (i = 0; i < dev_tbl->size; i++) {
-		struct ht_int32_node *node = HT_NODE(dev_tbl, dev_tbl->nodes, i);
+		struct ht_int64_node *node = ht_node(dev_tbl, dev_tbl->nodes, i);
 		if (node->data)
 			hashtable_destroy(node->data);
 	}
@@ -114,7 +114,7 @@ static void match_gnums(int32 *ndx_list, int ndx_count)
 {
 	int32 from, prev;
 	struct file_struct *file, *file_next;
-	struct ht_int32_node *node = NULL;
+	struct ht_int64_node *node = NULL;
 	int32 gnum, gnum_next;
 
 	qsort(ndx_list, ndx_count, sizeof ndx_list[0], (int (*)(const void*, const void*))hlink_compare_gnum);
@@ -247,7 +247,7 @@ static char *check_prior(struct file_struct *file, int gnum,
 			 int *prev_ndx_p, struct file_list **flist_p)
 {
 	struct file_struct *fp;
-	struct ht_int32_node *node;
+	struct ht_int64_node *node;
 	int prev_ndx = F_HL_PREV(file);
 
 	while (1) {
@@ -524,7 +524,7 @@ void finish_hard_link(struct file_struct *file, const char *fname, int fin_ndx,
 
 	if (inc_recurse) {
 		int gnum = F_HL_GNUM(file);
-		struct ht_int32_node *node = hashtable_find(prior_hlinks, gnum, NULL);
+		struct ht_int64_node *node = hashtable_find(prior_hlinks, gnum, NULL);
 		if (node == NULL) {
 			rprintf(FERROR, "Unable to find a hlink node for %d (%s)\n", gnum, f_name(file, prev_name));
 			exit_cleanup(RERR_MESSAGEIO);
