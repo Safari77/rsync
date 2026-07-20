@@ -758,6 +758,19 @@ fi
 
 AC_SEARCH_LIBS(inet_ntop, resolv)
 
+AC_CACHE_CHECK([for stdc_bit_ceil in stdbit.h], [rsync_cv_have_stdc_bit_ceil],
+  [AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM(
+      [[#include <stddef.h>
+        #include <stdbit.h>]],
+      [[size_t n = stdc_bit_ceil((size_t)7);
+        return n == 8 ? 0 : 1;]])],
+    [rsync_cv_have_stdc_bit_ceil=yes],
+    [rsync_cv_have_stdc_bit_ceil=no])])
+AS_IF([test "x$rsync_cv_have_stdc_bit_ceil" = xyes],
+  [AC_DEFINE([HAVE_STDC_BIT_CEIL], [1],
+    [Define to 1 if <stdbit.h> provides the stdc_bit_ceil macro.])])
+
 # For OS X, Solaris, HP-UX, etc.: figure out if -liconv is needed.  We'll
 # accept either iconv_open or libiconv_open, since some include files map
 # the former to the latter.

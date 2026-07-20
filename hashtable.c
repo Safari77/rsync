@@ -37,11 +37,13 @@ struct hashtable *hashtable_create(int size)
     }
 
 	/* Pick a power of 2 that can hold the requested size. */
-	if (size & (size-1) || size < 16) {
-		size = 16;
-		while (size < req)
-			size *= 2;
-	}
+#ifdef HAVE_STDC_BIT_CEIL
+	size = stdc_bit_ceil(req < 16 ? (size_t)16 : (size_t)req);
+#else
+	size = 16;
+	while (size < req)
+		size *= 2;
+#endif
 
 	tbl = new(struct hashtable);
 	tbl->nodes = new_array0(char, size * node_size);

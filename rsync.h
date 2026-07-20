@@ -377,6 +377,10 @@ enum delret {
 # include <unistd.h>
 #endif
 
+#ifdef HAVE_STDC_BIT_CEIL
+#include <stdbit.h>
+#endif
+
 #ifdef HAVE_SYS_PARAM_H
 #include <sys/param.h>
 #endif
