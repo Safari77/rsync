@@ -32,7 +32,7 @@ struct hashtable *hashtable_create(int size)
 	uint32 node_size = sizeof(struct ht_int64_node);
 
 	if ((uint32)size > (INT_MAX / node_size)) {
-		rprintf(FINFO, "[%s] called hashtable_create with invalid parameter\n", who_am_i());
+		rprintf(FERROR, "[%s] called hashtable_create with invalid parameter\n", who_am_i());
 		exit_cleanup(RERR_PROTOCOL);
     }
 

@@ -500,6 +500,29 @@ enum delret {
 # endif
 #endif
 
+#if defined(__has_include)
+#if __has_include(<features.h>)
+#include <features.h>
+#endif
+#endif
+
+/* getrandom() needs both a Linux kernel and a libc that ships
+ * <sys/random.h> (glibc >= 2.25; musl and others expose it too, detected
+ * via __has_include). Old kernels are still handled at runtime via ENOSYS. */
+#if defined(__linux__)
+#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 25)
+#include <sys/random.h>
+#define USE_SYS_GETRANDOM 1
+#endif
+#elif defined(__has_include)
+#if __has_include(<sys/random.h>)
+#include <sys/random.h>
+#define USE_SYS_GETRANDOM 1
+#endif
+#endif
+#endif
+
 #ifdef MAJOR_IN_MKDEV
 #include <sys/mkdev.h>
 # if !defined makedev && (defined mkdev || defined _WIN32 || defined __WIN32__)

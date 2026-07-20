@@ -2020,29 +2020,6 @@ cleanup:
 #endif // O_NOFOLLOW, O_DIRECTORY
 }
 
-#if defined O_NOFOLLOW && defined O_DIRECTORY && defined AT_FDCWD
-/* Fill buf with len random bytes.  Prefers /dev/urandom for cryptographic
- * quality; falls back to rand() if /dev/urandom cannot be opened or read
- * (e.g. inside a chroot or container without /dev populated). */
-static void rand_bytes(unsigned char *buf, size_t len)
-{
-#ifndef O_CLOEXEC
-#define O_CLOEXEC 0
-#endif
-	int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (fd >= 0) {
-		ssize_t n = read(fd, buf, len);
-		close(fd);
-		if (n == (ssize_t)len) {
-			return;
-		}
-	}
-	for (size_t i = 0; i < len; i++) {
-		buf[i] = (unsigned char)rand();
-	}
-}
-#endif
-
 /*
   Secure version of mkstemp that prevents symlink attacks on parent directories.
   Like secure_relative_open(), this walks the path checking each component

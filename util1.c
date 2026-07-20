@@ -353,13 +353,97 @@ static int unlink_and_reopen(const char *dest, mode_t mode)
 
 static int fsync_check(int fd)
 {
-        int ret;
+	int ret;
 
-        do {
-                ret = fsync(fd);
-        } while ((ret == -1) && (errno == EINTR));
-        if ((ret == -1) && (errno == EINVAL)) return 0;
-        return ret;
+	do {
+		ret = fsync(fd);
+	} while ((ret == -1) && (errno == EINTR));
+	if ((ret == -1) && (errno == EINVAL)) return 0;
+	return ret;
+}
+
+/** Fill a buffer with random data
+ * \param buf a buffer to fill
+ * \param buflen the number of bytes to fill; must not exceed SSIZE_MAX
+ * \return the number of bytes filled (buflen)
+ *
+ * Fill \a buf with \a buflen random bytes.
+ *
+ * On any failure to obtain randomness (or if buflen > SSIZE_MAX) this
+ * function print an error and exits the program.
+ */
+ssize_t rand_bytes(void* buf, size_t buflen)
+{
+	size_t total_read = 0;
+	char* ptr = (char*)buf;
+	// Reject requests whose success value would not fit in ssize_t; reads
+	// larger than SSIZE_MAX are implementation-defined in POSIX anyway.
+	if (buflen > (size_t)SSIZE_MAX) {
+		rprintf(FERROR, "[%s] called rand_bytes with invalid parameter\n", who_am_i());
+		exit_cleanup(RERR_PROTOCOL);
+	}
+#ifdef USE_SYS_GETRANDOM
+	// Cache the "kernel too old" result so we do not pay a failing syscall
+	// on every call.
+	static int getrandom_unsupported = 0;
+	if (!__atomic_load_n(&getrandom_unsupported, __ATOMIC_RELAXED)) {
+		while (total_read < buflen) {
+			ssize_t res = getrandom(ptr + total_read, buflen - total_read, 0);
+			if (res < 0) {
+				if (errno == EINTR) continue;
+				if (errno == ENOSYS && total_read == 0) {
+					// System kernel too old, remember that and fall back to
+					// /dev/urandom
+					__atomic_store_n(&getrandom_unsupported, 1,
+									 __ATOMIC_RELAXED);
+					break;
+				}
+				rprintf(FERROR, "getrandom failed with error %s\n", strerror(errno));
+				exit_cleanup(RERR_PROTOCOL);
+			}
+
+			total_read += res;
+		}
+		if (total_read == buflen) return (ssize_t)total_read;
+	}
+#endif
+	// Fallback: Lazy-load and cache the /dev/urandom file descriptor.
+	// Note: the cached descriptor is not fork-safe in the sense that a child
+	// which closes "all" descriptors (daemonization) will leave it stale.
+	static int cached_fd = -1;
+	int fd = __atomic_load_n(&cached_fd, __ATOMIC_RELAXED);
+	if (fd < 0) {
+		int new_fd = open("/dev/urandom", O_RDONLY | O_NOCTTY | O_CLOEXEC);
+		if (new_fd < 0) {
+			rprintf(FERROR, "opening /dev/random failed: %s\n", strerror(errno));
+			exit_cleanup(RERR_PROTOCOL);
+		}
+		int expected = -1;
+		// Use atomic swap to prevent descriptor leaks if multiple threads hit
+		// this at once
+		if (__atomic_compare_exchange_n(&cached_fd, &expected, new_fd, 0,
+										__ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+			fd = new_fd;
+		} else {
+			// Another thread initialized it first
+			close(new_fd);
+			fd = expected;
+		}
+	}
+	while (total_read < buflen) {
+		ssize_t res = read(fd, ptr + total_read, buflen - total_read);
+		if (res < 0) {
+			if (errno == EINTR) continue;
+			rprintf(FERROR, "reading from /dev/urandom failed: %s\n", strerror(errno));
+			exit_cleanup(RERR_PROTOCOL);
+		}
+		if (res == 0) {
+			rprintf(FERROR, "/dev/urandom returned 0 bytes\n");
+			exit_cleanup(RERR_PROTOCOL);
+		}
+		total_read += res;
+	}
+	return (ssize_t)total_read;
 }
 
 /* Copy contents of file @source to file @dest with mode @mode.
