@@ -22,6 +22,7 @@
 #include "rsync.h"
 #include "itypes.h"
 #include "ifuncs.h"
+#include <setjmp.h> /* for the handshake-timeout siglongjmp (see below) */
 
 extern int quiet;
 extern int dry_run;
@@ -96,6 +97,66 @@ static item_list gid_list = EMPTY_ITEM_LIST;
 
 /* Used when "reverse lookup" is off. */
 const char undetermined_hostname[] = "UNDETERMINED";
+
+/* Watchdog for the pre-transfer handshake (reverse-DNS lookup, protocol
+ * greeting, AUTHREQD exchange, and the client's argument list).  None of
+ * these reads are covered by io_timeout, which is not armed until after the
+ * module is selected, so a client that connects and then goes silent would
+ * otherwise pin a child process -- and a "max connections" slot -- forever.
+ * The timeout length is the "handshake timeout" daemon parameter (seconds;
+ * 0 disables it).  The alarm is canceled once the real transfer begins (see
+ * rsync_module), after which the normal per-module/client io_timeout governs
+ * the session.
+ *
+ * When the alarm fires we can't log from the handler (rprintf() is not
+ * async-signal-safe), so the handler siglongjmp()s back to normal context in
+ * start_daemon(), which logs the event and exits.  This mirrors the existing
+ * setjmp-based signal handling in android.c. */
+static sigjmp_buf handshake_timeout_jmp;
+
+static void handshake_timeout_handler(UNUSED(int val))
+{
+	/* Async-signal context: siglongjmp() is async-signal-safe.  It returns
+	 * us to the sigsetjmp() point in start_daemon() where logging is safe. */
+	siglongjmp(handshake_timeout_jmp, 1);
+}
+
+static void arm_handshake_timeout(void)
+{
+	if (lp_handshake_timeout() <= 0)
+		return;
+#ifdef HAVE_SIGACTION
+	{
+		struct sigaction sa;
+		sa.sa_handler = handshake_timeout_handler;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0; /* no SA_RESTART: we must let the blocking read be interrupted */
+		sigaction(SIGALRM, &sa, NULL);
+	}
+#else
+	signal(SIGALRM, handshake_timeout_handler);
+#endif
+	alarm(lp_handshake_timeout());
+}
+
+/* Fully detach the calling process from the handshake watchdog: stop the
+ * timer and restore SIGALRM's default disposition.  Safe to call even when
+ * the watchdog was never armed (alarm(0) and SIG_DFL are harmless no-ops). */
+static void cancel_handshake_timeout(void)
+{
+	alarm(0);
+#ifdef HAVE_SIGACTION
+	{
+		struct sigaction sa;
+		sa.sa_handler = SIG_DFL;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0;
+		sigaction(SIGALRM, &sa, NULL);
+	}
+#else
+	signal(SIGALRM, SIG_DFL);
+#endif
+}
 
 /**
  * Run a client connected to an rsyncd.  The alternative to this
@@ -509,6 +570,13 @@ static pid_t start_pre_exec(const char *cmd, int *arg_fd_ptr, int *error_fd_ptr)
 		char buf[BIGPATHBUFLEN];
 		int j, len, status;
 
+		/* Detach from the parent's handshake watchdog: these exec'd
+		 * hooks (and the long-lived name-converter coprocess) must not
+		 * be killed at the handshake deadline, and must not inherit the
+		 * siglongjmp handler.  The parent still bounds how long it waits
+		 * for the transient early/pre-xfer hooks. */
+		cancel_handshake_timeout();
+
 		if (error_fd_ptr) {
 			close(error_fds[0]);
 			set_blocking(error_fds[1]);
@@ -900,6 +968,10 @@ static int rsync_module(int f_in, int f_out, int i, const char *addr, const char
 			}
 			if (pid) {
 				int status;
+				/* This parent waits for the whole transfer, so it
+				 * must not be killed by the handshake watchdog; the
+				 * forked child keeps the alarm until start_server. */
+				cancel_handshake_timeout();
 				close(f_in);
 				if (f_out != f_in)
 					close(f_out);
@@ -1205,6 +1277,10 @@ static int rsync_module(int f_in, int f_out, int i, const char *addr, const char
 			am_sender ? "outgo" : "incom", p);
 	}
 
+	/* Handshake is complete; hand timeout duties over to the normal
+	 * io_timeout machinery (set from the module/client timeout above). */
+	cancel_handshake_timeout();
+
 	start_server(f_in, f_out, argc, argv);
 
 	return 0;
@@ -1294,6 +1370,20 @@ int start_daemon(int f_in, int f_out)
 	 * (when rsync is run by init and run by a remote shell). */
 	if (!load_config(0))
 		exit_cleanup(RERR_SYNTAX);
+
+	/* Bound the whole pre-transfer handshake (proxy header, reverse-DNS,
+	 * greeting, auth, arg list) so a silent client can't pin this child
+	 * (and a connection slot) indefinitely.  Armed after load_config()
+	 * because the length comes from the "handshake timeout" parameter, and
+	 * canceled in rsync_module() once the transfer proper starts.  If the
+	 * watchdog fires, its handler siglongjmp()s back to here (normal
+	 * context) so we can log the event and exit cleanly. */
+	if (sigsetjmp(handshake_timeout_jmp, 1)) {
+		rprintf(FLOG, "handshake timeout (%d seconds) from %s\n",
+			lp_handshake_timeout(), client_addr(f_in));
+		_exit(RERR_TIMEOUT);
+	}
+	arm_handshake_timeout();
 
 	if (lp_proxy_protocol() && !read_proxy_protocol_header(f_in))
 		return -1;

@@ -10,6 +10,7 @@ STRING	socket_options		NULL
 
 INTEGER	listen_backlog		5
 INTEGER	rsync_port|port		0
+INTEGER	handshake_timeout	30
 
 BOOL	proxy_protocol		False
 

@@ -127,6 +127,10 @@ parameters:
     You can override the default backlog value when the daemon listens for
     connections.  It defaults to 5.
 
+0. `handshake timeout`
+
+    Timeout for handshake, default 30 (seconds).
+
 You may also include any [MODULE PARAMETERS](#) in the global part of the
 config file, in which case the supplied value will override the default for
 that parameter.
