@@ -27,6 +27,7 @@
 #include "rsync.h"
 #include "itypes.h"
 #include "ifuncs.h"
+#include <stdatomic.h> /* C11 lock-free atomics for the SIGCHLD event ring */
 #ifdef HAVE_NETINET_IN_SYSTM_H
 #include <netinet/in_systm.h>
 #endif
@@ -558,25 +559,100 @@ int is_a_socket(int fd)
 	return getsockopt(fd, SOL_SOCKET, SO_TYPE, (char *)&v, &l) == 0;
 }
 
-static int volatile numchildren;
+/* Count of live child (per-connection) server processes.  It is bumped in
+ * the (single-threaded) accept loop and decremented in the SIGCHLD handler,
+ * so it must be a type that can be touched atomically with respect to a
+ * signal.  The accept loop keeps SIGCHLD blocked while it reads/writes this
+ * value and around the sigsuspend() capacity gate, which is what closes the
+ * lost-wakeup race -- the ring buffer below does NOT replace that discipline. */
+static volatile sig_atomic_t numchildren;
+
+/* ---------------------------
+ * Lock-free single-producer / single-consumer ring for child-exit events.
+ *
+ * Producer: sigchld_handler() (async-signal context).  It must only do
+ *   async-signal-safe work, so it may not call rprintf()/stdio/malloc.  It is
+ *   limited to waitpid(), a decrement of the sig_atomic_t counter, and
+ *   lock-free atomic loads/stores -- all of which are permitted in a signal
+ *   handler by C11 7.14.1.1p5 (the atomics are async-signal-safe only because
+ *   they are lock-free; see the assert in start_accept_loop()).
+ *
+ * Consumer: drain_child_events(), called from the accept loop in normal
+ *   context, where rprintf() is safe.
+ *
+ * head is written only by the producer, tail only by the consumer.  Both are
+ * free-running counters (masked only when indexing) so that "empty" is
+ * head==tail and "full" is head-tail==SIZE, with correct behavior across
+ * unsigned wraparound.
+ * --------------------------- */
+#define CHILD_EVENT_RING_SIZE 256u             /* must be a power of two */
+#define CHILD_EVENT_RING_MASK (CHILD_EVENT_RING_SIZE - 1u)
+/* head-tail masking and the head-tail<SIZE full test both require a power of two. */
+#if (CHILD_EVENT_RING_SIZE & CHILD_EVENT_RING_MASK) != 0
+#error CHILD_EVENT_RING_SIZE must be a power of two
+#endif
+
+struct child_event {
+	pid_t pid;
+	int status;
+};
+
+static struct child_event child_event_ring[CHILD_EVENT_RING_SIZE];
+static atomic_size_t child_event_head; /* producer cursor (SIGCHLD handler) */
+static atomic_size_t child_event_tail; /* consumer cursor (accept loop)     */
 
 static void printstatus(void)
 {
-	rprintf(FINFO, "%d/%d childs\n", numchildren, lp_max_connections(module_id));
+	rprintf(FINFO, "%d/%d childs\n", (int)numchildren, lp_max_connections(module_id));
+}
+
+/* Consumer side: log and discard every queued child-exit event.  Runs in the
+ * accept loop (normal context), so rprintf() is safe here. */
+static void drain_child_events(void)
+{
+	size_t tail = atomic_load_explicit(&child_event_tail, memory_order_relaxed);
+	size_t head = atomic_load_explicit(&child_event_head, memory_order_acquire);
+
+	while (tail != head) {
+		struct child_event ev = child_event_ring[tail & CHILD_EVENT_RING_MASK];
+		/* Publish the freed slot to the producer before doing any slow,
+		 * lock-taking work (rprintf). */
+		atomic_store_explicit(&child_event_tail, ++tail, memory_order_release);
+
+		if (WIFSIGNALED(ev.status)) {
+			rprintf(FINFO, "child %d killed by signal %d\n",
+				(int)ev.pid, WTERMSIG(ev.status));
+		} else {
+			rprintf(FINFO, "child %d exited with status %d\n",
+				(int)ev.pid, WEXITSTATUS(ev.status));
+		}
+	}
 }
 
 static void sigchld_handler(UNUSED(int val))
 {
 	int wstat;
-	int pid;
-	int crashed;
+	pid_t pid;
 
+	/* Reap every child that has exited.  We do NOT log here: rprintf() is
+	 * not async-signal-safe.  Instead we hand each exit status to the
+	 * consumer via the lock-free ring and let the accept loop log it. */
 	while ((pid = waitpid(-1, &wstat, WNOHANG)) > 0) {
-		crashed = WIFSIGNALED(wstat);
-		rprintf(FINFO, "children %d status %s %d\n", pid, crashed ? "signal" : "exit",
-			crashed ? WTERMSIG(wstat) : WEXITSTATUS(wstat));
-		if (numchildren) --numchildren;
-		printstatus();
+		size_t head = atomic_load_explicit(&child_event_head, memory_order_relaxed);
+		size_t tail = atomic_load_explicit(&child_event_tail, memory_order_acquire);
+
+		if (head - tail < CHILD_EVENT_RING_SIZE) { /* room available */
+			child_event_ring[head & CHILD_EVENT_RING_MASK].pid = pid;
+			child_event_ring[head & CHILD_EVENT_RING_MASK].status = wstat;
+			atomic_store_explicit(&child_event_head, head + 1, memory_order_release);
+		}
+		/* If the ring is full we drop the log line only; the reap and the
+		 * count decrement below still happen, so the connection limit stays
+		 * correct.  A full 256-slot ring means 256 children exited between
+		 * two accept-loop iterations, which won't happen in practice. */
+
+		if (numchildren)
+			--numchildren;
 	}
 
 #ifndef HAVE_SIGACTION
@@ -588,6 +664,16 @@ void start_accept_loop(int port, int (*fn)(int, int))
 {
 	fd_set deffds;
 	int *sp, maxfd, i;
+	int max_connections;
+
+	/* The SIGCHLD producer stores into the ring from async-signal context,
+	 * which C only permits for lock-free atomics.  Verify that assumption
+	 * once at startup rather than silently corrupting state on an exotic
+	 * platform where size_t atomics are emulated with a lock. */
+	if (!atomic_is_lock_free(&child_event_head)) {
+		rprintf(FERROR, "internal error: size_t atomics are not lock-free on this platform\n");
+		exit_cleanup(RERR_UNSUPPORTED);
+	}
 
 	/* open an incoming socket */
 	sp = open_socket_in(SOCK_STREAM, port, bind_address, default_af_hint);
@@ -632,7 +718,23 @@ void start_accept_loop(int port, int (*fn)(int, int))
 		 * forever */
 		logfile_close();
 
-		while (numchildren >= lp_max_connections(module_id)) sig_pause();
+		/* This counter mechanism enforces a single GLOBAL cap on the
+		 * number of live child servers, taken from the global "max
+		 * connections" value (module_id is -1 in the listener, so the
+		 * per-module value is not visible here and is not honored by
+		 * this mechanism).  A value <= 0 means "no limit" -- matching the
+		 * historical claim_connection() semantics where 0 == unlimited --
+		 * so we must NOT gate in that case or the daemon would block
+		 * forever without ever accepting a connection. */
+		max_connections = lp_max_connections(module_id);
+		if (max_connections > 0) {
+			while (numchildren >= max_connections)
+				sig_pause();
+		}
+
+		/* Log any child exits the SIGCHLD handler queued for us.  Safe
+		 * here (normal context); the handler itself never calls stdio. */
+		drain_child_events();
 
 #ifdef FD_COPY
 		FD_COPY(&deffds, &fds);
