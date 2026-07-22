@@ -86,10 +86,10 @@ struct ht_int64_node *idev_find(int64 dev, int64 ino)
 
 void idev_destroy(void)
 {
-	int i;
+	uint32 i;
 
 	for (i = 0; i < dev_tbl->size; i++) {
-		struct ht_int64_node *node = ht_node(dev_tbl, dev_tbl->nodes, i);
+		struct ht_int64_node *node = ht_node(dev_tbl->nodes, i);
 		if (node->data)
 			hashtable_destroy(node->data);
 	}

@@ -724,20 +724,21 @@ typedef unsigned int size_t;
 # define SIZEOF_INT64 SIZEOF_OFF_T
 #endif
 
-struct hashtable {
-	void *nodes;
-	int32 size, entries;
-	uint32 node_size;
-};
-
 struct ht_int64_node {
 	void *data;
 	int64 key;
 };
 
-static inline void *ht_node(struct hashtable *tbl, void *bkts, size_t i)
+struct hashtable {
+	struct ht_int64_node *nodes;
+	uint32 size, entries;
+};
+
+#define HT_NODE_SIZE (sizeof (struct ht_int64_node))
+
+static inline struct ht_int64_node *ht_node(struct ht_int64_node *bkts, size_t i)
 {
-	return (char*)bkts + i * tbl->node_size;
+	return bkts + i;
 }
 
 static inline int64 ht_key(struct ht_int64_node *node)

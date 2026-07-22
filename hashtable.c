@@ -19,46 +19,47 @@
 
 #include "rsync.h"
 
-#define HASH_LOAD_LIMIT(size) ((size)*3/4)
+/* size is always a power of 2 that is >= 16, so dividing before multiplying
+ * is exact and can never overflow, no matter how large the table grows. */
+#define HASH_LOAD_LIMIT(size) ((size)/4*3)
 
-#define hashsize(n) ((uint32_t)1<<(n))
-#define hashmask(n) (hashsize(n)-1)
-#define rot(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
-
-struct hashtable *hashtable_create(int size)
+struct hashtable *hashtable_create(uint32 size)
 {
-	int req = size;
+	uint32 req = size;
 	struct hashtable *tbl;
-	uint32 node_size = sizeof(struct ht_int64_node);
 
-	if ((uint32)size > (INT_MAX / node_size)) {
-		rprintf(FERROR, "[%s] called hashtable_create with invalid parameter\n", who_am_i());
+	if (req > (UINT_MAX / 2) + 1) {
+		rprintf(FERROR, "[%s] hashtable_create size causes power-of-2 overflow\n", who_am_i());
 		exit_cleanup(RERR_PROTOCOL);
-    }
+	}
 
-	/* Pick a power of 2 that can hold the requested size. */
 #ifdef HAVE_STDC_BIT_CEIL
-	size = stdc_bit_ceil(req < 16 ? (size_t)16 : (size_t)req);
+	/* req is bounded to <= 2^31 above, so the rounded-up power of 2 always fits in uint32. */
+	size = (uint32)stdc_bit_ceil(req < 16 ? (size_t)16 : (size_t)req);
 #else
 	size = 16;
 	while (size < req)
 		size *= 2;
 #endif
 
+	if (size > UINT_MAX / HT_NODE_SIZE) {
+		rprintf(FERROR, "[%s] hashtable_create size exceeds the allocation limit\n", who_am_i());
+		exit_cleanup(RERR_PROTOCOL);
+	}
+
 	tbl = new(struct hashtable);
-	tbl->nodes = new_array0(char, size * node_size);
+	tbl->nodes = new_array0(struct ht_int64_node, size);
 	tbl->size = size;
 	tbl->entries = 0;
-	tbl->node_size = node_size;
 
 	if (DEBUG_GTE(HASH, 1)) {
 		char buf[32];
 		if (req != size)
-			snprintf(buf, sizeof buf, "req: %d, ", req);
+			snprintf(buf, sizeof buf, "req: %" PRIu32 ", ", req);
 		else
 			*buf = '\0';
-		rprintf(FINFO, "[%s] created hashtable %lx (%ssize: %d, keys: 64-bit)\n",
-			who_am_i(), (long)tbl, buf, size);
+		rprintf(FINFO, "[%s] created hashtable %p (%ssize: %" PRIu32 ", keys: 64-bit)\n",
+			who_am_i(), (void *)tbl, buf, size);
 	}
 
 	return tbl;
@@ -67,8 +68,8 @@ struct hashtable *hashtable_create(int size)
 void hashtable_destroy(struct hashtable *tbl)
 {
 	if (DEBUG_GTE(HASH, 1)) {
-		rprintf(FINFO, "[%s] destroyed hashtable %lx (size: %d, keys: 64-bit)\n",
-			who_am_i(), (long)tbl, tbl->size);
+		rprintf(FINFO, "[%s] destroyed hashtable %p (size: %" PRIu32 ", keys: 64-bit)\n",
+			who_am_i(), (void *)tbl, tbl->size);
 	}
 	free(tbl->nodes);
 	free(tbl);
@@ -94,21 +95,27 @@ struct ht_int64_node *hashtable_find(struct hashtable *tbl, int64 key, void *dat
 	}
 
 	if (data_when_new && tbl->entries > HASH_LOAD_LIMIT(tbl->size)) {
-		void *old_nodes = tbl->nodes;
-		int size = tbl->size * 2;
-		int i;
+		struct ht_int64_node *old_nodes = tbl->nodes;
+		uint32 i, size;
 
-		tbl->nodes = new_array0(char, size * tbl->node_size);
+		/* Ensure that the doubled size still satisfies size <= UINT_MAX / HT_NODE_SIZE. */
+		if (tbl->size > (UINT_MAX / HT_NODE_SIZE) / 2) {
+			rprintf(FERROR, "Hashtable limit reached, cannot expand further!\n");
+			exit_cleanup(RERR_MALLOC);
+		}
+		size = tbl->size * 2;
+
+		tbl->nodes = new_array0(struct ht_int64_node, size);
 		tbl->size = size;
 		tbl->entries = 0;
 
 		if (DEBUG_GTE(HASH, 1)) {
-			rprintf(FINFO, "[%s] growing hashtable %lx (size: %d, keys: 64-bit)\n",
-				who_am_i(), (long)tbl, size);
+			rprintf(FINFO, "[%s] growing hashtable %p (size: %" PRIu32 ", keys: 64-bit)\n",
+				who_am_i(), (void *)tbl, size);
 		}
 
 		for (i = size / 2; i-- > 0; ) {
-			struct ht_int64_node *move_node = ht_node(tbl, old_nodes, i);
+			struct ht_int64_node *move_node = ht_node(old_nodes, i);
 			int64 move_key = ht_key(move_node);
 			if (move_key == 0)
 				continue;
@@ -144,21 +151,29 @@ struct ht_int64_node *hashtable_find(struct hashtable *tbl, int64 key, void *dat
 
 	/* If it already exists, return the node.  If we're not
 	 * allocating, return NULL if the key is not found. */
-	while (1) {
-		int64 nkey;
-
-		ndx &= tbl->size - 1;
-		node = ht_node(tbl, tbl->nodes, ndx);
+	uint32 initial_ndx = ndx & (tbl->size - 1);
+	int64 nkey;
+	ndx = initial_ndx;
+	do {
+		node = ht_node(tbl->nodes, ndx);
 		nkey = ht_key(node);
-
 		if (nkey == key)
 			return node;
-		if (nkey == 0) {
-			if (!data_when_new)
-				return NULL;
+		if (nkey == 0)
 			break;
-		}
-		ndx++;
+		ndx = (ndx + 1) & (tbl->size - 1);
+	} while (ndx != initial_ndx);
+
+	if (!data_when_new)
+		return NULL;
+
+	if (nkey != 0) {
+		/* The table is full and the key was not found.  This is unreachable
+		 * while the load-limit growth above keeps empty buckets available,
+		 * but returning NULL here would violate the documented contract
+		 * (callers dereference the result), so fail loudly instead. */
+		rprintf(FERROR, "Internal hashtable error: table is full!\n");
+		exit_cleanup(RERR_MESSAGEIO);
 	}
 
 	node->key = key;
@@ -177,8 +192,9 @@ uint64_t hashlittle2(const void *key, size_t length)
 		rand_bytes(sipkey, sizeof(sipkey));
 		rndinit = 1;
 	}
+
 	ret = siphash13(key, length, sipkey[0], sipkey[1]);
-	return ret ?: 1;
+	return ret ? ret : 1; /* a key of 0 is reserved as the empty-bucket marker */
 }
 
 #if defined(_MSC_VER)
@@ -242,7 +258,6 @@ siphash13_core(const void *data, size_t len, uint64_t k0, uint64_t k1,
 	const unsigned char *p   = (const unsigned char *)data;
 	const unsigned char *end = p + (len & ~(size_t)7);
 	size_t left = len & 7;
-
 	uint64_t v0 = 0x736f6d6570736575ULL ^ k0;
 	uint64_t v1 = 0x646f72616e646f6dULL ^ k1;
 	uint64_t v2 = 0x6c7967656e657261ULL ^ k0;
@@ -261,14 +276,13 @@ siphash13_core(const void *data, size_t len, uint64_t k0, uint64_t k1,
 	/* Final block: remaining 0..7 bytes, with (len & 0xff) in the top byte. */
 	m = 0;
 	if (left)
-		memcpy(&m, p, left); /* little-endian layout of the tail bytes */
+		memcpy(&m, p, left); /* tail bytes land in memory order */
 #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-	m = sip_bswap64(m) >> (8 * (8 - left));
+	m = sip_bswap64(m); /* reinterpret the memory-order bytes as a little-endian value */
 #endif
 	if (fold_case)
 		m = sip_tolower64(m); /* padding zeros and length byte area are 0 here */
 	m |= (uint64_t)(len & 0xff) << 56;
-
 	v3 ^= m;
 	SIPROUND(v0, v1, v2, v3);
 	v0 ^= m;
