@@ -3128,6 +3128,13 @@ static void flist_sort_and_clean(struct file_list *flist, int strip_root)
 		for (i = flist->low; i <= flist->high; i++) {
 			struct file_struct *fp, *file = flist->sorted[i];
 
+			/* A cleared duplicate has a zeroed mode, so it would
+			 * fall into the non-dir case below and wrongly reprieve
+			 * the pending chain.  It is not a real list item, so
+			 * skip it. */
+			if (!F_IS_ACTIVE(file))
+				continue;
+
 			/* This temporarily abuses the F_DEPTH() value for a
 			 * directory that is in a chain that might get pruned.
 			 * We restore the old value if it gets a reprieve. */
