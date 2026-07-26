@@ -1259,7 +1259,7 @@ int change_dir(const char *dir, int set_path_only)
 		skipped_chdir = set_path_only;
 		memcpy(curr_dir, dir, len + 1);
 	} else {
-		unsigned int save_dir_len = curr_dir_len;
+		size_t save_dir_len = curr_dir_len;
 		if (curr_dir_len + 1 + len >= sizeof curr_dir) {
 			errno = ENAMETOOLONG;
 			return 0;
