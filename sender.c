@@ -45,7 +45,6 @@ extern int protocol_version;
 extern int remove_source_files;
 extern int updating_basis_file;
 extern int make_backups;
-extern int make_source_backups;
 extern int inplace;
 extern int inplace_partial;
 extern int batch_fd;
@@ -136,7 +135,6 @@ void successful_send(int ndx)
 	struct file_struct *file;
 	struct file_list *flist;
 	STRUCT_STAT st;
-	int result;
 
 	if (!remove_source_files)
 		return;
@@ -170,11 +168,7 @@ void successful_send(int ndx)
 		return;
 	}
 
-	if (make_source_backups)
-		result = !make_backup(fname, True);
-	else
-		result = do_unlink(fname);
-	if (result < 0) {
+	if (do_unlink(fname) < 0) {
 		failed_op = "remove";
 	  failed:
 		if (errno == ENOENT)
