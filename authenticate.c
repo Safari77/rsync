@@ -64,55 +64,17 @@ void base64_encode(const char *buf, int len, char *out, int pad)
 	out[i] = '\0';
 }
 
-/* Fill buf with len bytes from the kernel CSPRNG.  Returns 1 on success.
- * We read /dev/urandom directly rather than depending on getrandom()/
- * arc4random_buf() availability so this works on every platform rsync
- * targets without new configure probes. */
-static int get_random_bytes(char *buf, int len)
-{
-	int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	int got = 0;
-	if (fd < 0)
-		return 0;
-	while (got < len) {
-		int n = read(fd, buf + got, len - got);
-		if (n <= 0)
-			break;
-		got += n;
-	}
-	close(fd);
-	return got == len;
-}
-
 /* Generate a challenge buffer and return it base64-encoded. */
-static void gen_challenge(const char *addr, char *challenge)
+static void gen_challenge(char *challenge)
 {
-	char input[32];
 	char rnd[32];
 	char digest[MAX_DIGEST_LEN];
-	struct timespec tsp;
 	int len;
 
-	memset(input, 0, sizeof input);
-
-	strlcpy(input, addr, 17);
-	clock_gettime(CLOCK_REALTIME, &tsp);
-	SIVAL(input, 16, tsp.tv_sec);
-	SIVAL(input, 20, tsp.tv_nsec);
-	SIVAL(input, 24, getpid());
-
 	len = sum_init(valid_auth_checksums.negotiated_nni, 0);
-	/* The challenge must be unpredictable to a network observer; addr+time
-	 * +pid alone is ~35 bits and lets an attacker enumerate the preimage
-	 * offline.  Hash 32 bytes from the kernel RNG first so the digest
-	 * carries full entropy, keeping the legacy inputs as a mix-in so a
-	 * urandom failure degrades to (never below) the old behaviour. */
-	if (get_random_bytes(rnd, sizeof rnd))
-		sum_update(rnd, sizeof rnd);
-	else
-		rprintf(FWARNING, "gen_challenge: /dev/urandom unavailable, "
-			"falling back to time-based challenge\n");
-	sum_update(input, sizeof input);
+	/* The challenge must be unpredictable to a network observer. */
+	rand_bytes(rnd, sizeof rnd);
+	sum_update(rnd, sizeof rnd);
 	sum_end(digest);
 
 	base64_encode(digest, len, challenge, 0);
@@ -332,7 +294,7 @@ char *auth_server(int f_in, int f_out, int module, const char *host,
 		}
 	}
 
-	gen_challenge(addr, challenge);
+	gen_challenge(challenge);
 
 	io_printf(f_out, "%s%s\n", leader, challenge);
 
