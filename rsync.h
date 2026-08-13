@@ -191,6 +191,13 @@
 #define IOERR_VANISHED	(1<<1)
 #define IOERR_DEL_LIMIT (1<<2)
 
+/* Mask of all currently defined IOERR_* bits.  Used to sanitize values
+ * received from a peer via MSG_IO_ERROR so a malicious peer cannot set
+ * arbitrary (undefined) bits in the local io_error, which would then be
+ * stored and re-forwarded upstream.  (Undefined bits never reach the exit
+ * code: cleanup.c maps only these defined bits onto RERR_* values.) */
+#define IOERR_VALID_MASK (IOERR_GENERAL | IOERR_VANISHED | IOERR_DEL_LIMIT)
+
 #define MAX_ARGS 1000
 #define MAX_BASIS_DIRS 20
 #define MAX_SERVER_ARGS (MAX_BASIS_DIRS*2 + 100)
@@ -425,6 +432,16 @@ enum delret {
 #include <grp.h>
 #endif
 #include <errno.h>
+
+/* O_NOFOLLOW refuses a final-component symlink with ELOOP on Linux, EMLINK on
+ * FreeBSD, and EFTYPE on NetBSD/OpenBSD. Treat all three as "hit a symlink". A
+ * genuine EMLINK (too many hard links) is harmless where this is used: callers
+ * fall through to a readlink/lstat, which restores the real error. */
+#ifdef EFTYPE
+# define NOFOLLOW_HIT_SYMLINK(e) ((e) == ELOOP || (e) == EMLINK || (e) == EFTYPE)
+#else
+# define NOFOLLOW_HIT_SYMLINK(e) ((e) == ELOOP || (e) == EMLINK)
+#endif
 
 #ifdef HAVE_UTIME_H
 #include <utime.h>
@@ -1060,6 +1077,7 @@ struct map_struct {
 #define FILTRULE_CLEAR_LIST	(1<<18)/* this item is the "!" token */
 #define FILTRULE_PERISHABLE	(1<<19)/* perishable if parent dir goes away */
 #define FILTRULE_XATTR		(1<<20)/* rule only applies to xattr names */
+#define FILTRULE_FROM_FILE	(1<<21)/* pattern text came from a file's contents */
 
 #define FILTRULES_SIDES (FILTRULE_SENDER_SIDE | FILTRULE_RECEIVER_SIDE)
 
@@ -1181,6 +1199,20 @@ typedef struct {
 #define UNUSED(x) x __attribute__((__unused__))
 #ifndef NORETURN
 #define NORETURN __attribute__((__noreturn__))
+#endif
+
+/* Under --enable-coverage, gcov flushes counters via an atexit handler that
+ * _exit() bypasses.  Forked helpers that terminate via _exit() -- the
+ * pre/post-xfer-exec children, the become_daemon original process, the
+ * per-connection accept-loop child on early return -- must dump explicitly
+ * or their counters are lost, which systematically under-reports daemon-side
+ * coverage.  cleanup.c and main.c already inline this for the two main exit
+ * paths; this macro covers the rest.  No-op when not a coverage build. */
+#ifdef GCOV_COVERAGE
+extern void __gcov_dump(void);
+#define gcov_flush() __gcov_dump()
+#else
+#define gcov_flush() ((void)0)
 #endif
 
 typedef struct {

@@ -12,17 +12,26 @@ on:
     paths:
       - 'testsuite/fleettest.py'
       - '.github/workflows/fleettest.yml'
+      - 'runtests.py'
+      - 'testsuite/skiplist/**'
+      - 'testsuite/skiplist-spec_test.py'
   pull_request:
-    branches: [ master ]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'testsuite/fleettest.py'
       - '.github/workflows/fleettest.yml'
+      - 'runtests.py'
+      - 'testsuite/skiplist/**'
+      - 'testsuite/skiplist-spec_test.py'
   workflow_dispatch:
   schedule:
     - cron: '17 7 * * 1'
 
 jobs:
   fleettest:
+    # temporary gate: PR CI runs only for PRs labeled 'run-ci', to save CI
+    # minutes; labels need triage access, so fork PRs can't self-enable.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: ubuntu-latest
     name: fleettest against localhost
     steps:

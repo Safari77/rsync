@@ -7,15 +7,18 @@ on:
       - '.github/workflows/*.yml'
       - '!.github/workflows/cygwin-build.yml'
   pull_request:
-    branches: [ master ]
+    types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - '.github/workflows/*.yml'
       - '!.github/workflows/cygwin-build.yml'
   schedule:
-    - cron: '42 8 * * 1'
+    - cron: '42 8 * * *'
 
 jobs:
   test:
+    # temporary gate: PR CI runs only for PRs labeled 'run-ci', to save CI
+    # minutes; labels need triage access, so fork PRs can't self-enable.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: windows-2022
     name: Test rsync on Cygwin
     steps:
@@ -43,10 +46,8 @@ jobs:
       # (rsyncfns.py drives xattrs via getfattr/setfattr from the `attr`
       # package installed above), verified on a real Cygwin host. The real
       # chown/devices tests still skip (need root/mknod), as do the
-      # RESOLVE_BENEATH symlink-race tests.  symlink-dirlink-basis also now
-      # RUNS (the #915 non-daemon basis open uses a plain do_open, restoring
-      # following an in-tree dir-symlink basis without RESOLVE_BENEATH).
-      run: bash -c 'RSYNC_EXPECT_SKIPPED=acls-default,acls-depth,acls,bare-do-open-symlink-race,chdir-symlink-race,chown,daemon-access-ip,daemon-chroot-acl,devices,dir-sgid,open-noatime,protected-regular,proxy-response-line-too-long,recv-discard-nullderef,sender-flist-symlink-leak,simd-checksum make check'
+      # RESOLVE_BENEATH symlink-race tests.
+      run: bash -c 'RSYNC_EXPECT_SKIPPED=@testsuite/skiplist/common.txt,@testsuite/skiplist/cygwin.txt make check'
     - name: check (TCP daemon transport)
       # Second run with daemon tests over a real loopback rsyncd; the default
       # 'make check' above uses the secure stdio-pipe transport.

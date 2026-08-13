@@ -13,15 +13,18 @@ on:
       - '.github/workflows/*.yml'
       - '!.github/workflows/almalinux-8-build.yml'
   pull_request:
-    branches: [ master ]
+    types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - '.github/workflows/*.yml'
       - '!.github/workflows/almalinux-8-build.yml'
   schedule:
-    - cron: '42 8 * * 1'
+    - cron: '42 8 * * *'
 
 jobs:
   test:
+    # temporary gate: PR CI runs only for PRs labeled 'run-ci', to save CI
+    # minutes; labels need triage access, so fork PRs can't self-enable.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: ubuntu-latest
     container:
       image: almalinux:8
@@ -62,7 +65,7 @@ jobs:
       # crtimes-not-supported skip matches the other Linux jobs;
       # daemon-chroot-acl and proxy-response-line-too-long skip because
       # the default (secure) transport opens no listening socket.
-      run: RSYNC_EXPECT_SKIPPED=crtimes,daemon-access-ip,daemon-chroot-acl,proxy-response-line-too-long,recv-discard-nullderef make check
+      run: RSYNC_EXPECT_SKIPPED=@testsuite/skiplist/common.txt,@testsuite/skiplist/linux.txt make check
     - name: check (TCP daemon transport)
       # Second run exercising the real loopback-TCP daemon path.
       run: ./runtests.py --rsync-bin="$PWD/rsync" --use-tcp -j 8
