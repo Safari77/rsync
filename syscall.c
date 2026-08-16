@@ -143,12 +143,17 @@ static const char *confinement_root(unsigned int *lenp)
 	return confine_root;
 }
 
-/* Split the "/proc/<self|pid>/fd" prefix off `p`, returning the tail -- "" for
- * the pin directory itself, otherwise a string starting with '/'.  NULL when `p`
- * is not in the fd-pin namespace at all. */
+/* Split a recognised fd-pin prefix off `p`, returning the tail -- "" for the
+ * pin directory itself, otherwise a string starting with '/'.  NULL when `p`
+ * is not in an fd-pin namespace. */
 static const char *fd_pin_tail(const char *p)
 {
 	const char *s;
+
+	if (strncmp(p, "/dev/fd", 7) == 0) {
+		s = p + 7;
+		return (*s == '\0' || *s == '/') ? s : NULL;
+	}
 
 	if (strncmp(p, "/proc/", 6) != 0)
 		return NULL;
@@ -168,8 +173,8 @@ static const char *fd_pin_tail(const char *p)
 	return (*s == '\0' || *s == '/') ? s : NULL;
 }
 
-/* An EXACT pin entry, "/proc/self/fd/7" -- the one spelling whose target is what
- * confinement must judge.  rrsync also writes a pinned parent as
+/* An EXACT pin entry, such as "/proc/self/fd/7" or "/dev/fd/7", whose target is
+ * what confinement must judge.  rrsync also writes a pinned parent as
  * ".../fd/7/<leaf>", but the walk resolves the magic link itself and checks the
  * components past it, so only the bare entry is resolved here.  Requiring all
  * digits keeps a planted name like ".../fd/outside-secret" out. */
@@ -291,6 +296,11 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
+#ifdef O_PATH
+	const int dir_traverse_flags = O_PATH | O_DIRECTORY | O_CLOEXEC;
+#else
+	const int dir_traverse_flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC;
+#endif
 	if (!path || !*path) {
 		errno = EINVAL;
 		return -1;
@@ -348,7 +358,7 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 
 	/* Absolute path: pin "/" as the starting dfd. */
 	if (remaining[0] == '/') {
-		dfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		dfd = open("/", dir_traverse_flags);
 		if (dfd < 0)
 			return -1;
 		dfd_owns = 1;
@@ -401,9 +411,14 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 		}
 
 		if (S_ISLNK(lst.st_mode)) {
-			/* Symlink: untrusted owner is refused; trusted owner
-			 * is followed via readlinkat + splice. */
-			if (lst.st_uid != 0 && lst.st_uid != trusted_uid) {
+			/* Symlink: untrusted owner is refused; trusted owner is followed
+			 * via readlinkat + splice.  In a user namespace the /proc/self and
+			 * /dev/fd symlinks may report the overflow uid, so
+			 * allow those exact components while traversing a recognised pin. */
+			int namespace_pin = pin_transit
+				&& ((strcmp(abspath, "/proc") == 0 && strcmp(comp, "self") == 0)
+				 || (strcmp(abspath, "/dev") == 0 && strcmp(comp, "fd") == 0));
+			if (!namespace_pin && lst.st_uid != 0 && lst.st_uid != trusted_uid) {
 				saved_errno = ELOOP;
 				goto out;
 			}
@@ -435,7 +450,7 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 
 			if (target[0] == '/') {
 				if (dfd_owns) close(dfd);
-				dfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+				dfd = open("/", dir_traverse_flags);
 				if (dfd < 0) {
 					saved_errno = errno;
 					dfd_owns = 0;
@@ -490,7 +505,7 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 			saved_errno = ELOOP;
 			goto out;
 		}
-		int next = openat(dfd, comp, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+		int next = openat(dfd, comp, dir_traverse_flags | O_NOFOLLOW);
 		if (next < 0) {
 			saved_errno = errno;
 			goto out;
@@ -510,12 +525,12 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 	}
 
 	/* Path resolved entirely to a directory (no leaf component left).
-	 * If the caller wanted O_DIRECTORY we already hold the dirfd we
-	 * built up; otherwise it's an EISDIR. */
+	 * Reopen the held traversal fd with the caller's requested access mode;
+	 * an O_PATH fd is sufficient for traversal and fchdir but not operations
+	 * such as fchmod. */
 	if (flags & O_DIRECTORY) {
-		retfd = dfd;
-		dfd_owns = 0;	/* caller now owns it */
-		saved_errno = 0;
+		retfd = openat(dfd, ".", flags | O_NOFOLLOW, mode);
+		saved_errno = retfd < 0 ? errno : 0;
 		if (out_abs && out_cap)
 			/* Root-resolved (".." popped abspath empty) tracked daemon walk:
 			 * hand back "/" so owner_walk_parent still leaf-checks (path=/ bypass). */
