@@ -36,13 +36,13 @@ int main(UNUSED(int argc), UNUSED(char *argv[]))
 	/* 2^28 buckets * 16-byte node = 2^32 bytes: the product wraps int to ~0 in
 	 * the unfixed code.  The fix must reject this (exit RERR_MALLOC) rather than
 	 * under-allocate. */
-	tbl = hashtable_create(1 << 28, 0);
+	tbl = hashtable_create(1 << 28);
 
 	/* Unreachable with the fix (hashtable_create exits above).  If a regression
 	 * lets it return, touch a node near the claimed end -- an under-allocated
 	 * table faults here -- and report the unexpected survival as a failure. */
 	for (i = 0; i < tbl->size; i += tbl->size / 64 + 1) {
-		struct ht_int32_node *node = HT_NODE(tbl, tbl->nodes, i);
+		struct ht_int64_node *node = ht_node(tbl->nodes, i);
 		node->key = i;
 	}
 	fprintf(stderr, "FAIL: hashtable_create(1<<28) was not rejected\n");
