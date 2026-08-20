@@ -1506,8 +1506,10 @@ int start_daemon(int f_in, int f_out)
 	}
 	arm_handshake_timeout();
 
-	if (lp_proxy_protocol() && !read_proxy_protocol_header(f_in))
-		return -1;
+	if (lp_proxy_protocol()) {
+		if (!proxy_peer_allowed(f_in) || !read_proxy_protocol_header(f_in))
+			return -1;
+	}
 
 	/* Do reverse DNS lookup before chroot/setuid. The result is cached,
 	 * so the later client_name() call will use this cached value. This
