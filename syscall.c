@@ -188,18 +188,15 @@ static int is_exact_fd_pin(const char *p)
 	return *tail == '\0' && tail[-1] != '/';
 }
 
-/* Refuse (return 1) when the ABSOLUTE resolved path `abspath` lands OUTSIDE the
- * confinement root, for an operator/peer-supplied path that must stay inside it
- * (--partial-dir/--backup-dir/alt-basis/merge files: operator_path_resolve).  An
- * in-tree symlink owned by uid 0 / the euid is followed by design, so it can
- * redirect the resolved target outside the root; this catches that escape.
- *
- * This is ROOT confinement only.  The daemon exclude/filter list is a name-based
- * visibility filter, NOT a physical-path boundary: a symlink whose own name is
- * not excluded may still resolve into an excluded IN-tree subtree, exactly as in
- * stock rsync.  The defense for a writable module is `munge symlinks` (see
- * rsyncd.conf(5)), not this walk. */
-static int abspath_outside_confinement(const char *abspath)
+/* Refuse (1) when `abspath` lands outside the confinement root, per the
+ * caller's policy:
+ *   must_stay_inside = 1: operator path that must stay in the root
+ *                        (--backup-dir/--temp-dir et al.), OR a transfer
+ *                        walk, where "outside" is impossible by construction
+ *                        and a hit means an invariant break -> refuse.
+ *   must_stay_inside = 0: an open that may legitimately live outside
+ *                        (--log-file, --*-from, daemon motd/lock). */
+static int abspath_outside_confinement(const char *abspath, int must_stay_inside)
 {
 	unsigned int rootlen;
 	const char *root = confinement_root(&rootlen);
@@ -221,8 +218,8 @@ static int abspath_outside_confinement(const char *abspath)
 			return 0;		/* the pin directory: transit, opens nothing */
 		if (is_exact_fd_pin(abspath)) {
 			ssize_t n = readlink(abspath, pinned, sizeof pinned - 1);
-			if (n <= 0 || pinned[0] != '/')
-				return operator_path_resolve ? 1 : 0;
+			if (n <= 0 || pinned[0] != '/' || (size_t)n >= sizeof pinned - 1)
+				return must_stay_inside ? 1 : 0;
 			pinned[n] = '\0';
 			abspath = pinned;
 		}
@@ -241,7 +238,7 @@ static int abspath_outside_confinement(const char *abspath)
 	if (alen == 0
 	 || (strncmp(abspath, root, alen) == 0 && root[alen] == '/'))
 		return 0;			/* ancestor of the root: still descending */
-	return operator_path_resolve ? 1 : 0;
+	return must_stay_inside ? 1 : 0;
 }
 
 /* Advance the tracked absolute path `abspath` by one resolved component,
@@ -288,7 +285,7 @@ static int abspath_step(char *abspath, size_t cap, const char *comp, size_t comp
 /* Core walk.  When out_abs is non-NULL and the path resolves to a directory
  * (O_DIRECTORY), the resolved absolute path is copied there -- owner_walk_parent
  * uses it to filter-check the (otherwise unchecked) leaf basename. */
-static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, size_t out_cap)
+static int ona_open(const char *path, int flags, mode_t mode, int must_stay_inside, char *out_abs, size_t out_cap)
 {
 #if defined AT_FDCWD && defined O_NOFOLLOW
 	/* O_CLOEXEC predates some still-supported targets; mirror rand_bytes()'s
@@ -398,7 +395,7 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 					saved_errno = errno;
 					goto out;
 				}
-				if (!pin_transit && abspath_outside_confinement(abspath)) {
+				if (!pin_transit && abspath_outside_confinement(abspath, must_stay_inside)) {
 					saved_errno = ELOOP;
 					goto out;
 				}
@@ -428,7 +425,7 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 			}
 			char target[MAXPATHLEN];
 			ssize_t n = readlinkat(dfd, comp, target, sizeof target - 1);
-			if (n < 0) {
+			if (n <= 0 || (size_t)n >= sizeof target - 1) {
 				saved_errno = errno;
 				goto out;
 			}
@@ -477,7 +474,7 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 				saved_errno = errno;
 				goto out;
 			}
-			if (!pin_transit && abspath_outside_confinement(abspath)) {
+			if (!pin_transit && abspath_outside_confinement(abspath, must_stay_inside)) {
 				saved_errno = ELOOP;
 				goto out;
 			}
@@ -501,7 +498,7 @@ static int ona_open(const char *path, int flags, mode_t mode, char *out_abs, siz
 			saved_errno = errno;
 			goto out;
 		}
-		if (!pin_transit && abspath_outside_confinement(abspath)) {
+		if (!pin_transit && abspath_outside_confinement(abspath, must_stay_inside)) {
 			saved_errno = ELOOP;
 			goto out;
 		}
@@ -552,7 +549,13 @@ out:
 
 int open_no_attacker_symlinks(const char *path, int flags, mode_t mode)
 {
-	return ona_open(path, flags, mode, NULL, 0);
+	return ona_open(path, flags, mode, operator_path_resolve, NULL, 0);
+}
+
+/* operator paths that must stay inside the root (--backup-dir/--temp-dir) */
+int open_no_attacker_symlinks_inroot(const char *path, int flags, mode_t mode)
+{
+    return ona_open(path, flags, mode, 1, NULL, 0);
 }
 
 /* When set, the do_*_at() wrappers resolve their path as an OPERATOR-supplied
@@ -580,7 +583,7 @@ int owner_walk_parent(const char *path, const char **bname)
 	*bname = slash ? slash + 1 : path;
 	pabs[0] = '\0';
 	if (!slash)
-		dfd = ona_open(".", O_RDONLY | O_DIRECTORY, 0, pabs, sizeof pabs);
+		dfd = ona_open(".", O_RDONLY | O_DIRECTORY, 0, 1, pabs, sizeof pabs);
 	else {
 		dlen = slash == path ? 1 : (size_t)(slash - path); /* "/x" -> parent "/" */
 		if (dlen >= sizeof dir) {
@@ -589,7 +592,7 @@ int owner_walk_parent(const char *path, const char **bname)
 		}
 		memcpy(dir, path, dlen);
 		dir[dlen] = '\0';
-		dfd = ona_open(dir, O_RDONLY | O_DIRECTORY, 0, pabs, sizeof pabs);
+		dfd = ona_open(dir, O_RDONLY | O_DIRECTORY, 0, 1, pabs, sizeof pabs);
 	}
 	if (dfd < 0)
 		return -1;
@@ -604,7 +607,7 @@ int owner_walk_parent(const char *path, const char **bname)
 			errno = ENAMETOOLONG;	/* fail closed, never skip the check */
 			return -1;
 		}
-		if (abspath_outside_confinement(leafabs)) {
+		if (abspath_outside_confinement(leafabs, 1)) {
 			close(dfd);
 			errno = ELOOP;
 			return -1;
@@ -1226,8 +1229,10 @@ int do_mknod(const char *pathname, mode_t mode, dev_t dev)
 
 		if ((sock = socket(PF_UNIX, SOCK_STREAM, 0)) < 0
 		 || (unlink(pathname) < 0 && errno != ENOENT)
-		 || (bind(sock, (struct sockaddr*)&saddr, sizeof saddr)) < 0)
+		 || (bind(sock, (struct sockaddr*)&saddr, sizeof saddr)) < 0) {
+			if (sock >= 0) close(sock);
 			return -1;
+		}
 		close(sock);
 #ifdef HAVE_CHMOD
 		return do_chmod(pathname, mode);
@@ -2925,7 +2930,7 @@ static int ds_descend(struct dirstack *ds, const char *part, int *hops)
 			return -1;
 		/* exclude-aware: refuse descending into a module-hidden dir (catches a
 		 * symlink that redirected the walk into an excluded subtree). */
-		if (abspath_outside_confinement(ds->abspath)) {
+		if (abspath_outside_confinement(ds->abspath, 0)) {
 			errno = ELOOP;
 			return -1;
 		}
@@ -3053,9 +3058,12 @@ static int secure_walk_at(int anchor_fd, const char *anchor_abspath,
 		if (is_last && !(flags & O_DIRECTORY)) {
 			if (ds.abspath[0]) {
 				char leafabs[MAXPATHLEN];
-				if (snprintf(leafabs, sizeof leafabs, "%s/%s", ds.abspath, part)
-				      < (int)sizeof leafabs
-				 && abspath_outside_confinement(leafabs)) {
+				int leaflen =  snprintf(leafabs, sizeof leafabs, "%s/%s", ds.abspath, part);
+				if (leaflen < 0 || leaflen >= (int)sizeof leafabs) {
+					errno = ENAMETOOLONG;
+					goto cleanup;
+				}
+				if (abspath_outside_confinement(leafabs, 0)) {
 					errno = ELOOP;
 					goto cleanup;
 				}
@@ -3416,8 +3424,10 @@ int secure_mkstemp(char *template, mode_t perms, int operator_path)
 			dir = dirbuf;
 		}
 		dirfd = operator_path
-		      ? open_no_attacker_symlinks(dir, O_RDONLY | O_DIRECTORY, 0)
-		      : secure_relative_open(dir, ".", O_RDONLY | O_DIRECTORY, 0);
+			? (symlink_optout_allowed()
+			   ? AT_FDCWD   /* legacy mkstemp path below */
+			   : open_no_attacker_symlinks_inroot(dir, O_RDONLY | O_DIRECTORY, 0))
+			: secure_relative_open(dir, ".", O_RDONLY | O_DIRECTORY, 0);
 		if (dirfd < 0)
 			return -1;
 	}
