@@ -35,7 +35,7 @@ extern int am_chrooted;
 extern char *module_dir;
 extern unsigned int module_dirlen;
 extern int module_dirfd;
-extern unsigned int curr_dir_len;
+extern size_t curr_dir_len;
 extern int am_sender;
 extern int am_generator;
 extern int inc_recurse;
