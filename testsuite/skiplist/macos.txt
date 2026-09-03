@@ -14,7 +14,6 @@ backup-crossdev-copy
 chmod-temp-dir
 copy-xattrs-symlink-race
 daemon-auth-group
-daemon-max-alloc-zero
 dir-sgid
 fake-super-acl-xattr
 link-dest-symlink-enotsup                # the ENOTSUP hard-link hook is an LD_PRELOAD, Linux-only
@@ -22,6 +21,8 @@ open-noatime
 partial-protected-regular-retry-linux
 preallocate
 protected-regular
+pseudo-paths  # dynamically skips on runners lacking bash process substitution
+read-batch-pipe
 readonly-partial-abort-mode-regression  # 
 rrsync-sender-leaf-flip
 rrsync-sender-parent-pin

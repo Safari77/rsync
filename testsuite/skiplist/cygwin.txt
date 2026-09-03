@@ -25,7 +25,6 @@ copy-xattrs-symlink-race
 daemon-auth-group
 daemon-chroot-munge-default
 daemon-config-symlink
-daemon-max-alloc-zero
 daemon-module-chdir-symlink
 daemon-module-private-parent
 daemon-secrets-file-symlink
@@ -52,6 +51,8 @@ partial-protected-regular-retry-linux
 partial-protected-regular-retry-policy  # deterministic partial EACCES recovery uses dyld interposing
 password-file-symlink
 protected-regular
+pseudo-paths
+read-batch-pipe
 rename-mixed-parent-transfer
 rrsync-sender-leaf-flip
 rrsync-sender-parent-pin
@@ -63,7 +64,6 @@ sender-remove-source-root-anchor
 simd-checksum
 source-change-size-continues
 symlink-dest-backupdir
-symlink-exclude-xattr
 symlink-race-dest
 symlink-race-relative-dest
 temp-dir-symlink-injection
