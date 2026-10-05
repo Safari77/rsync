@@ -26,6 +26,7 @@
 
 #if defined HAVE_WCHAR_H && defined HAVE_MBRTOWC
 #include <wchar.h>
+#include <wctype.h>
 typedef mbstate_t filter_mbstate;
 #else
 typedef int filter_mbstate;
@@ -248,101 +249,143 @@ void logfile_reopen(void)
 	}
 }
 
-/* Decode one character using the active locale. Invalid or incomplete input
- * returns 0 so its bytes are filtered individually. */
-static size_t locale_char_len(const char *buf, size_t len, filter_mbstate *state,
-			      int *is_control)
+/* Check for control characters, log injection delimiters, and BiDi overrides. */
+static int is_dangerous_wchar(wchar_t wc)
 {
-#if defined HAVE_WCHAR_H && defined HAVE_MBRTOWC
-	wchar_t wc;
-	size_t char_len = mbrtowc(&wc, buf, len, state);
+    if (wc == L'\t')
+        return 0;
 
-	if (char_len == (size_t)-1 || char_len == (size_t)-2) {
-		memset(state, 0, sizeof *state);
-		return 0;
-	}
-	if (char_len == 0)
-		char_len = 1;
-	*is_control = wc != L'\t'
-		&& (wc < L' ' || (wc >= 0x7f && wc <= 0x9f));
-	return char_len;
-#else
-	(void)buf;
-	(void)len;
-	(void)state;
-	(void)is_control;
-	return 0;
-#endif
+    /* C0 control characters and DEL */
+    if (wc < 0x20 || wc == 0x7F)
+        return 1;
+
+    /* C1 control characters (includes U+0085 NEL / Next Line) */
+    if (wc >= 0x80 && wc <= 0x9F)
+        return 1;
+
+    /* Unicode line and paragraph separators (prevents log injection via CWE-117) */
+    if (wc == 0x2028 || wc == 0x2029)
+        return 1;
+
+    /* BiDi directional formatting and overrides (prevents filename spoofing) */
+    if (wc == 0x200E || wc == 0x200F) /* LRM, RLM */
+        return 1;
+    if (wc >= 0x202A && wc <= 0x202E) /* LRE, RLE, PDF, LRO, RLO */
+        return 1;
+    if (wc >= 0x2066 && wc <= 0x2069) /* LRI, RLI, FSI, PDI */
+        return 1;
+
+    return 0;
 }
 
-static size_t filtered_char_len(const char *buf, size_t len, int use_isprint,
-				filter_mbstate *state, int *escape)
-{
-	uchar byte = *(const uchar *)buf;
-	int is_control = 0;
-	size_t char_len = !use_isprint && byte >= 0x80
-		? locale_char_len(buf, len, state, &is_control) : 0;
-
-	if (char_len) {
-		*escape = is_control;
-		return char_len;
-	}
-	*escape = (len > 4 && *buf == '\\' && buf[1] == '#'
-		   && isDigit(buf + 2) && isDigit(buf + 3) && isDigit(buf + 4))
-	       || (*buf != '\t' && ((use_isprint && !isPrint(buf)) || byte < ' '
-		   || byte == 0x7f || (byte >= 0x80 && byte <= 0x9f)));
-	return 1;
-}
+#define CARRYOVER_MAX 8
 
 static void filtered_fwrite(FILE *f, const char *in_buf, int in_len, int use_isprint, char end_char)
 {
-	char outbuf[1024];
-	filter_mbstate state;
-	size_t out_len = 0;
-	const char *end = in_buf + in_len;
-	memset(&state, 0, sizeof state);
+    char outbuf[1024];
+    size_t out_len = 0;
+    const char *end = in_buf + in_len;
 
-	while (in_buf < end) {
-		int escape;
-		size_t i, char_len = filtered_char_len(
-			in_buf, (size_t)(end - in_buf), use_isprint, &state, &escape);
-		size_t expansion = escape ? 5 : 1;
-		size_t out_size;
+#if defined HAVE_WCHAR_H && defined HAVE_MBRTOWC
+    static mbstate_t stream_state;
+    static char carryover[CARRYOVER_MAX];
+    static size_t carry_len = 0;
 
-		if (out_len > sizeof outbuf || char_len > sizeof outbuf / expansion)
-			exit_cleanup(RERR_MESSAGEIO);
-		out_size = char_len * expansion;
-		if (sizeof outbuf - out_len < out_size) {
-			if (out_len && fwrite(outbuf, 1, out_len, f) != out_len)
-				exit_cleanup(RERR_MESSAGEIO);
-			out_len = 0;
-		}
-		if (escape) {
-			for (i = 0; i < char_len; i++) {
-				uchar byte = (uchar)in_buf[i];
-				outbuf[out_len++] = '\\';
-				outbuf[out_len++] = '#';
-				outbuf[out_len++] = (char)('0' + ((byte >> 6) & 7));
-				outbuf[out_len++] = (char)('0' + ((byte >> 3) & 7));
-				outbuf[out_len++] = (char)('0' + (byte & 7));
-			}
-		} else {
-			memcpy(outbuf + out_len, in_buf, char_len);
-			out_len += char_len;
-		}
-		in_buf += char_len;
-	}
-	if (end_char && out_len == sizeof outbuf) {
-		if (fwrite(outbuf, 1, out_len, f) != out_len)
-			exit_cleanup(RERR_MESSAGEIO);
-		out_len = 0;
-	}
-	if (end_char)
-		outbuf[out_len++] = end_char;
-	if (out_len > sizeof outbuf)
-		exit_cleanup(RERR_MESSAGEIO);
-	if (out_len && fwrite(outbuf, 1, out_len, f) != out_len)
-		exit_cleanup(RERR_MESSAGEIO);
+    /* Combine residual bytes from previous invocation with incoming buffer */
+    while (carry_len > 0 && in_buf < end) {
+        wchar_t wc;
+        size_t res;
+
+        if (carry_len >= sizeof carryover) {
+            /* Overflow safety: emit oldest residual byte as escape and shift */
+            uchar b = (uchar)carryover[0];
+            out_len += snprintf(outbuf + out_len, sizeof outbuf - out_len, "\\#%03o", b);
+            memmove(carryover, carryover + 1, --carry_len);
+        }
+
+        carryover[carry_len++] = *in_buf++;
+        res = mbrtowc(&wc, carryover, carry_len, &stream_state);
+
+        if (res == (size_t)-2) {
+            /* Still incomplete; continue accumulating bytes from in_buf */
+            continue;
+        } else if (res == (size_t)-1) {
+            /* Invalid sequence: escape first byte, reset state, retry residue */
+            uchar b = (uchar)carryover[0];
+            memset(&stream_state, 0, sizeof stream_state);
+            out_len += snprintf(outbuf + out_len, sizeof outbuf - out_len, "\\#%03o", b);
+            memmove(carryover, carryover + 1, --carry_len);
+        } else {
+            /* Successfully resolved split multibyte character */
+            size_t i;
+            for (i = 0; i < carry_len; i++)
+                outbuf[out_len++] = carryover[i];
+            carry_len = 0;
+            break;
+        }
+    }
+#endif
+
+    while (in_buf < end) {
+        int escape = 0;
+        size_t char_len = 1;
+
+#if defined HAVE_WCHAR_H && defined HAVE_MBRTOWC
+        wchar_t wc;
+        size_t res = mbrtowc(&wc, in_buf, (size_t)(end - in_buf), &stream_state);
+
+        if (res == (size_t)-2) {
+            /* Trailing bytes are incomplete: stash in carryover for the next chunk */
+            size_t remaining = (size_t)(end - in_buf);
+            if (remaining > sizeof carryover)
+                remaining = sizeof carryover;
+            memcpy(carryover, in_buf, remaining);
+            carry_len = remaining;
+            break;
+        } else if (res == (size_t)-1) {
+            /* Invalid sequence: reset state and escape this single byte */
+            memset(&stream_state, 0, sizeof stream_state);
+            escape = 1;
+            char_len = 1;
+        } else {
+            char_len = res ? res : 1;
+            escape = is_dangerous_wchar(wc) || (use_isprint && !iswprint((wint_t)wc));
+        }
+#else
+        uchar byte = *(const uchar *)in_buf;
+        escape = (byte < ' ' && byte != '\t') || byte == 0x7f || (use_isprint && !isprint(byte));
+#endif
+
+        if (sizeof outbuf - out_len < (escape ? char_len * 5 : char_len)) {
+            if (out_len && fwrite(outbuf, 1, out_len, f) != out_len)
+                exit_cleanup(RERR_MESSAGEIO);
+            out_len = 0;
+        }
+
+        if (escape) {
+            size_t i;
+            for (i = 0; i < char_len; i++) {
+                uchar b = (uchar)in_buf[i];
+                out_len += snprintf(outbuf + out_len, sizeof outbuf - out_len, "\\#%03o", b);
+            }
+        } else {
+            memcpy(outbuf + out_len, in_buf, char_len);
+            out_len += char_len;
+        }
+        in_buf += char_len;
+    }
+
+    if (end_char) {
+        if (out_len >= sizeof outbuf) {
+            if (fwrite(outbuf, 1, out_len, f) != out_len)
+                exit_cleanup(RERR_MESSAGEIO);
+            out_len = 0;
+        }
+        outbuf[out_len++] = end_char;
+    }
+
+    if (out_len && fwrite(outbuf, 1, out_len, f) != out_len)
+        exit_cleanup(RERR_MESSAGEIO);
 }
 
 /* this is the underlying (unformatted) rsync debugging function. Call
