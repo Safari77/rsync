@@ -185,7 +185,8 @@ static void start_filelist_progress(char *kind)
 
 static void emit_filelist_progress(int count)
 {
-	if (quiet)
+    /* Never emit interactive terminal progress when running as a remote server */
+    if (quiet || am_server)
 		return;
 	if (output_needs_newline == 2) /* avoid a newline in the middle of this filelist-progress output */
 		output_needs_newline = 0;

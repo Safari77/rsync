@@ -552,7 +552,8 @@ void rput_progress(void)
 {
 	FILE *f = msgs2stderr == 1 ? stderr : stdout;
 
-	if (quiet)
+	/* Prevent unmultiplexed raw carriage returns from corrupting socket streams in server mode */
+	if (quiet || am_server)
 		return;
 	if (fputc('\r', f) == EOF || fflush(f) == EOF)
 		exit_cleanup(RERR_MESSAGEIO);
