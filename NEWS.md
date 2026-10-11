@@ -1,3 +1,19 @@
+# NEWS for UNRELEASED
+
+## Changes in this version:
+
+### ENHANCEMENTS:
+- Human-readable output now uses dynamic precision to show three significant
+  digits and appends `i` to binary unit suffixes. `--progress` uses the same
+  formatter for transfer rates and labels byte counts and rates with `B` and
+  `B/s`. Example output includes `46.7M`, `48.8Mi`, `782,448B` and
+  `113,295B/s`. File-list, created-directory and skipped-deletion counts also
+  use thousands separators.
+- Added `--delay-symlinks` to defer creating new and changed symlinks until
+  other transferred files are in place.
+
+------------------------------------------------------------------------------
+
 # NEWS for rsync 3.5.1 (21 Sep 2026)
 
 ## Changes in this version:
