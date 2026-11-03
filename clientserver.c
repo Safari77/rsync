@@ -1500,6 +1500,7 @@ int start_daemon(int f_in, int f_out)
 	 * (when rsync is run by init and run by a remote shell). */
 	if (!load_config(0))
 		exit_cleanup(RERR_SYNTAX);
+	niceness_apply();
 
 	/* Bound the whole pre-transfer handshake (proxy header, reverse-DNS,
 	 * greeting, auth, arg list) so a silent client can't pin this child
@@ -1888,6 +1889,7 @@ int daemon_main(void)
 		exit_cleanup(RERR_SYNTAX);
 	}
 	set_dparams(0);
+	niceness_apply();
 
 	/* "proxy protocol = true" with no trusted-proxy list rejects every
 	 * connection as an untrusted proxy peer (fail-closed).  That is intended,
